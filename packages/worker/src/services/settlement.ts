@@ -11,6 +11,7 @@ import {
   getBetsForMarketOption,
 } from "@kazam/db/queries";
 import { calculatePayout } from "@kazam/shared/odds";
+import { WHEN_BUCKETS } from "@kazam/shared/constants";
 import { bets, users, markets, marketOptions } from "@kazam/shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import type { NotificationMessage } from "@kazam/shared/types";
@@ -25,6 +26,7 @@ export interface SettlementResult {
 
 /**
  * Settle a market: mark winner, calculate payouts, credit winners.
+ * For WHEN markets, each bet is evaluated individually based on its placed_at time.
  */
 export async function settleMarket(
   db: Database,
@@ -54,7 +56,7 @@ export async function settleMarket(
   const winningOption = options.find((o) => o.id === winningOptionId);
   if (!winningOption) return { error: "Winning option not found" };
 
-  // Mark winning option
+  // Mark winning option (for display purposes)
   for (const opt of options) {
     await db
       .update(marketOptions)
@@ -67,12 +69,35 @@ export async function settleMarket(
   const winners: SettlementResult["winners"] = [];
   const losers: SettlementResult["losers"] = [];
 
+  const alertTime = Date.now();
+
+  // For WHEN markets: each bet is evaluated based on time from placed_at to alert
+  const isWhenMarket = market.type === "when";
+
   // Get all bets for this market
   for (const opt of options) {
     const optBets = await getBetsForMarketOption(db, marketId, opt.id);
 
     for (const bet of optBets) {
-      const isWin = opt.id === winningOptionId;
+      let isWin: boolean;
+
+      if (isWhenMarket) {
+        // Per-bet evaluation: elapsed = alert time - bet placed_at
+        const betPlacedAt = new Date(bet.placed_at).getTime();
+        const elapsed = alertTime - betPlacedAt;
+        const bucketIndex = opt.sort_order;
+
+        if (bucketIndex < WHEN_BUCKETS.length) {
+          const bucket = WHEN_BUCKETS[bucketIndex];
+          isWin = elapsed >= bucket.min_ms && elapsed < bucket.max_ms;
+        } else {
+          isWin = false;
+        }
+      } else {
+        // Standard: option matches winning option
+        isWin = opt.id === winningOptionId;
+      }
+
       let payout = 0;
 
       if (isWin) {
