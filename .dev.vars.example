@@ -1,0 +1,14 @@
+# Telegram Bot Token (from @BotFather)
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+
+# Telegram Bot Secret (for webhook validation)
+TELEGRAM_BOT_SECRET=your_webhook_secret_here
+
+# Mini App URL (Cloudflare Pages deployment URL)
+MINI_APP_URL=https://kazam.pages.dev
+
+# Alert Proxy URL (Israeli proxy for Pikud HaOref API)
+ALERT_PROXY_URL=https://your-proxy.example.com/alerts
+
+# Environment
+ENVIRONMENT=development

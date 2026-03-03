@@ -1,0 +1,29 @@
+{
+  "name": "@kazam/shared",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./schema": "./dist/schema.js",
+    "./types": "./dist/types.js",
+    "./regions": "./dist/regions.js",
+    "./constants": "./dist/constants.js",
+    "./odds": "./dist/odds.js",
+    "./validation": "./dist/validation.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.38.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

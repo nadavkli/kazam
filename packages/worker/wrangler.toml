@@ -1,0 +1,32 @@
+name = "kazam-worker"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+
+[observability]
+enabled = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "kazam-db"
+database_id = "7d3432c0-a68c-40f7-8b4b-0e31b18d0a58"
+
+[durable_objects]
+bindings = [
+  { name = "ALERT_POLLER", class_name = "AlertPoller" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["AlertPoller"]
+
+[[queues.producers]]
+queue = "kazam-notifications"
+binding = "NOTIFICATION_QUEUE"
+
+[[queues.consumers]]
+queue = "kazam-notifications"
+max_batch_size = 10
+max_batch_timeout = 5
+
+[vars]
+ENVIRONMENT = "production"
