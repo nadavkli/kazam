@@ -18,7 +18,7 @@ export const users = sqliteTable(
     last_daily_claim_at: text("last_daily_claim_at"),
     referral_code: text("referral_code").notNull(),
     referred_by: integer("referred_by"),
-    created_at: text("created_at").notNull().default("(datetime('now'))"),
+    created_at: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     uniqueIndex("users_telegram_id_idx").on(table.telegram_id),
@@ -45,7 +45,7 @@ export const markets = sqliteTable(
     opens_at: text("opens_at").notNull(),
     closes_at: text("closes_at").notNull(),
     resolved_at: text("resolved_at"),
-    created_at: text("created_at").notNull().default("(datetime('now'))"),
+    created_at: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     index("markets_status_idx").on(table.status),
@@ -88,7 +88,7 @@ export const bets = sqliteTable(
     amount: integer("amount").notNull(),
     payout: integer("payout"),
     is_win: integer("is_win", { mode: "boolean" }),
-    placed_at: text("placed_at").notNull().default("(datetime('now'))"),
+    placed_at: text("placed_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     index("bets_user_idx").on(table.user_id),
@@ -107,7 +107,7 @@ export const alerts = sqliteTable(
     regions: text("regions", { mode: "json" }).notNull().$type<string[]>(),
     instructions: text("instructions"),
     dedupe_hash: text("dedupe_hash").notNull(),
-    received_at: text("received_at").notNull().default("(datetime('now'))"),
+    received_at: text("received_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [uniqueIndex("alerts_dedupe_hash_idx").on(table.dedupe_hash)],
 );
@@ -134,7 +134,7 @@ export const achievements = sqliteTable(
       .notNull()
       .references(() => users.id),
     type: text("type").notNull(),
-    unlocked_at: text("unlocked_at").notNull().default("(datetime('now'))"),
+    unlocked_at: text("unlocked_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     uniqueIndex("achievements_user_type_idx").on(table.user_id, table.type),
@@ -155,7 +155,7 @@ export const referrals = sqliteTable(
     bonus_paid: integer("bonus_paid", { mode: "boolean" })
       .notNull()
       .default(false),
-    created_at: text("created_at").notNull().default("(datetime('now'))"),
+    created_at: text("created_at").notNull().$defaultFn(() => new Date().toISOString()),
   },
   (table) => [
     uniqueIndex("referrals_referred_idx").on(table.referred_id),

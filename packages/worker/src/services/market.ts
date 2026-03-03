@@ -187,6 +187,29 @@ export async function settleExpiredHowManyMarkets(
     }
   }
 
+  // Also settle expired WHEN markets (> 24 hours without alert = last bucket wins)
+  const openWhenMarkets = await listMarkets(db, {
+    status: "open",
+    type: "when",
+    limit: 10,
+    offset: 0,
+  });
+
+  for (const market of openWhenMarkets) {
+    const closesAt = new Date(market.closes_at).getTime();
+    if (now < closesAt) continue;
+
+    const options = await getMarketOptions(db, market.id);
+    const lastOption = options[options.length - 1]; // "> 24 hours" bucket
+    if (!lastOption) continue;
+
+    const result = await settleMarket(db, market.id, lastOption.id, null);
+    if (!("error" in result)) {
+      settledCount++;
+      allNotifications.push(...result.notifications);
+    }
+  }
+
   // Create tomorrow's HOW_MANY market
   await maybeCreateHowManyMarket(db);
 
