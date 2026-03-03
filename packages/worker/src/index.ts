@@ -9,6 +9,7 @@ import {
   maybeCreateWhereMarket,
   maybeCreateWhenMarket,
   maybeCreateHowManyMarket,
+  settleExpiredHowManyMarkets,
 } from "./services/market.js";
 import { settleMarket } from "./services/settlement.js";
 
@@ -166,6 +167,17 @@ app.post("/internal/simulate-alert", async (c) => {
 
 export default {
   fetch: app.fetch,
+
+  // Cron trigger: settle HOW_MANY markets at end of day
+  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    const db = createDb(env.DB);
+    const result = await settleExpiredHowManyMarkets(db);
+    console.log(`[CRON] Settled ${result.settled} HOW_MANY markets`);
+    // Queue notifications
+    for (const n of result.notifications) {
+      await env.NOTIFICATION_QUEUE.send(n);
+    }
+  },
 
   // Queue consumer
   async queue(batch: MessageBatch, env: Env): Promise<void> {

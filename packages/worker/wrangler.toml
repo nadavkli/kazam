@@ -28,5 +28,9 @@ queue = "kazam-notifications"
 max_batch_size = 10
 max_batch_timeout = 5
 
+# Cron trigger: settle HOW_MANY markets at end of day IST (23:59 IST = 20:59 UTC)
+[triggers]
+crons = ["59 20 * * *"]
+
 [vars]
 ENVIRONMENT = "production"

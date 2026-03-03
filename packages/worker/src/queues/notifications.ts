@@ -1,6 +1,8 @@
 import type { Env } from "../index.js";
 import type { NotificationMessage } from "@kazam/shared/types";
 import { REGION_LABELS, type Region } from "@kazam/shared/regions";
+import { createDb } from "@kazam/db";
+import { getAllUsers } from "@kazam/db/queries";
 
 /**
  * Process notification queue messages — sends Telegram messages to users.
@@ -33,7 +35,7 @@ async function processNotification(
       await sendBetResultNotification(notification, env);
       break;
     case "market_opened":
-      // Could broadcast to subscribed users
+      await sendMarketOpenedNotification(notification, env);
       break;
   }
 }
@@ -51,11 +53,23 @@ async function sendAlertNotification(
   const moreCount = Math.max(0, alert.cities.length - 5);
   const cityStr = moreCount > 0 ? `${cityList} +${moreCount}` : cityList;
 
-  // This is a broadcast — in production you'd maintain a subscribers list
-  // For now, this just logs. Real implementation would iterate subscribers.
-  console.log(
-    `[ALERT] ${regionNames}: ${cityStr}`,
-  );
+  const text =
+    `🚨 *אזעקה!*\n\n` +
+    `📍 ${regionNames}\n` +
+    `🏙️ ${cityStr}\n\n` +
+    `⚡ יש שווקים פתוחים — בואו לנחש!`;
+
+  // Broadcast to all users
+  const db = createDb(env.DB);
+  const users = await getAllUsers(db);
+
+  for (const user of users) {
+    try {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text);
+    } catch {
+      // Skip users who blocked the bot
+    }
+  }
 }
 
 async function sendBetResultNotification(
@@ -82,6 +96,30 @@ async function sendBetResultNotification(
   }
 
   await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, telegram_id, text);
+}
+
+async function sendMarketOpenedNotification(
+  notification: Extract<NotificationMessage, { type: "market_opened" }>,
+  env: Env,
+): Promise<void> {
+  const { market } = notification;
+
+  const typeEmoji = market.type === "where" ? "📍" : market.type === "when" ? "⏰" : "🔢";
+  const text =
+    `${typeEmoji} *שוק חדש נפתח!*\n\n` +
+    `🎯 ${market.question}\n\n` +
+    `השתמש ב /bet כדי להמר עכשיו!`;
+
+  const db = createDb(env.DB);
+  const users = await getAllUsers(db);
+
+  for (const user of users) {
+    try {
+      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text);
+    } catch {
+      // Skip users who blocked the bot
+    }
+  }
 }
 
 async function sendTelegramMessage(

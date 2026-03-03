@@ -4,6 +4,9 @@ import {
   createMarketOption,
   getOpenMarketByType,
   getLatestAlert,
+  getDailyAlertCount,
+  getMarketOptions,
+  listMarkets,
 } from "@kazam/db/queries";
 import { REGIONS, REGION_LABELS } from "@kazam/shared/regions";
 import {
@@ -12,7 +15,8 @@ import {
   HOW_MANY_BUCKETS,
   IST_TIMEZONE,
 } from "@kazam/shared/constants";
-import type { MarketType, Market } from "@kazam/shared/types";
+import type { MarketType, Market, NotificationMessage } from "@kazam/shared/types";
+import { settleMarket } from "./settlement.js";
 
 /**
  * Auto-create a WHERE market if cooldown has passed since last alert.
@@ -129,4 +133,62 @@ export async function maybeCreateHowManyMarket(
   }
 
   return market;
+}
+
+/**
+ * Settle expired HOW_MANY markets at end of day.
+ * Called by Cloudflare Scheduled Event (cron trigger).
+ */
+export async function settleExpiredHowManyMarkets(
+  db: Database,
+): Promise<{ settled: number; notifications: NotificationMessage[] }> {
+  const openMarkets = await listMarkets(db, {
+    status: "open",
+    type: "how_many",
+    limit: 10,
+    offset: 0,
+  });
+
+  const now = Date.now();
+  const allNotifications: NotificationMessage[] = [];
+  let settledCount = 0;
+
+  for (const market of openMarkets) {
+    const closesAt = new Date(market.closes_at).getTime();
+    if (now < closesAt) continue; // Not yet expired
+
+    // Extract date from question_en (format: "... (YYYY-MM-DD)")
+    const dateMatch = market.question_en.match(/\((\d{4}-\d{2}-\d{2})\)/);
+    if (!dateMatch) continue;
+    const marketDate = dateMatch[1];
+
+    // Get the actual alert count for that day
+    const dailyCount = await getDailyAlertCount(db, marketDate);
+    const totalAlerts = dailyCount?.total_count ?? 0;
+
+    // Find the winning bucket option
+    const options = await getMarketOptions(db, market.id);
+    let winningOption = options[options.length - 1]; // Default to last (20+)
+
+    for (let i = 0; i < HOW_MANY_BUCKETS.length; i++) {
+      const bucket = HOW_MANY_BUCKETS[i];
+      if (totalAlerts >= bucket.min && totalAlerts <= bucket.max) {
+        winningOption = options[i];
+        break;
+      }
+    }
+
+    if (!winningOption) continue;
+
+    const result = await settleMarket(db, market.id, winningOption.id, null);
+    if (!("error" in result)) {
+      settledCount++;
+      allNotifications.push(...result.notifications);
+    }
+  }
+
+  // Create tomorrow's HOW_MANY market
+  await maybeCreateHowManyMarket(db);
+
+  return { settled: settledCount, notifications: allNotifications };
 }

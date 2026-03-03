@@ -327,10 +327,22 @@ export function upsertDailyCount(
       set: {
         missile_count: sql`${dailyAlertCounts.missile_count} + ${data.missile_count}`,
         total_count: sql`${dailyAlertCounts.total_count} + ${data.total_count}`,
-        regions: sql`${JSON.stringify(data.regions)}`,
+        regions: sql`json_patch(${dailyAlertCounts.regions}, ${JSON.stringify(data.regions)})`,
       },
     })
     .run();
+}
+
+export function getDailyAlertCount(db: Database, date: string) {
+  return db
+    .select()
+    .from(dailyAlertCounts)
+    .where(eq(dailyAlertCounts.date, date))
+    .get();
+}
+
+export function getAllUsers(db: Database) {
+  return db.select({ id: users.id, telegram_id: users.telegram_id }).from(users).all();
 }
 
 // ====== Leaderboard Queries ======

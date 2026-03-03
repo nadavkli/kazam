@@ -248,9 +248,27 @@ export class AlertPoller implements DurableObject {
         },
       } satisfies NotificationMessage);
 
-      // Create new markets after settlement
-      await maybeCreateWhereMarket(db);
-      await maybeCreateWhenMarket(db);
+      // Create new markets after settlement and notify
+      const newWhere = await maybeCreateWhereMarket(db);
+      if (newWhere) {
+        const { getMarketOptions: getOpts } = await import("@kazam/db/queries");
+        const opts = await getOpts(db, newWhere.id);
+        await this.env.NOTIFICATION_QUEUE.send({
+          type: "market_opened",
+          market: newWhere,
+          options: opts,
+        } satisfies NotificationMessage);
+      }
+      const newWhen = await maybeCreateWhenMarket(db);
+      if (newWhen) {
+        const { getMarketOptions: getOpts } = await import("@kazam/db/queries");
+        const opts = await getOpts(db, newWhen.id);
+        await this.env.NOTIFICATION_QUEUE.send({
+          type: "market_opened",
+          market: newWhen,
+          options: opts,
+        } satisfies NotificationMessage);
+      }
       await maybeCreateHowManyMarket(db);
     }
   }
