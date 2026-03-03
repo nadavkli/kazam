@@ -67,7 +67,7 @@ export function calculateMarketOdds(
 }
 
 /**
- * Calculate the actual payout for a winning bet.
+ * Calculate the actual payout for a winning bet (WHERE / HOW_MANY).
  *
  * @param betAmount - How much the user bet
  * @param totalPool - Total pool across all options
@@ -86,5 +86,28 @@ export function calculatePayout(
 
   // User's share of the winning option pool
   const share = betAmount / seededWinning;
+  return Math.floor(share * netPool);
+}
+
+/**
+ * Calculate payout for WHEN market where winners are determined per-bet.
+ * Winners from different options share the pool proportionally.
+ *
+ * @param betAmount - This winner's bet amount
+ * @param totalPool - Total pool across all options
+ * @param totalWinningAmount - Sum of ALL winning bets (across any option)
+ * @param optionCount - Number of options in the market
+ */
+export function calculateWhenPayout(
+  betAmount: number,
+  totalPool: number,
+  totalWinningAmount: number,
+  optionCount: number,
+): number {
+  const seededTotal = totalPool + OPTION_SEED_AMOUNT * optionCount;
+  const netPool = seededTotal * (1 - RAKE_PERCENT / 100);
+
+  // Winner's share = their bet / total winning bets
+  const share = betAmount / totalWinningAmount;
   return Math.floor(share * netPool);
 }

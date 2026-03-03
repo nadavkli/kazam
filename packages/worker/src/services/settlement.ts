@@ -10,7 +10,7 @@ import {
   updateUserCoins,
   getBetsForMarketOption,
 } from "@kazam/db/queries";
-import { calculatePayout } from "@kazam/shared/odds";
+import { calculatePayout, calculateWhenPayout } from "@kazam/shared/odds";
 import { WHEN_BUCKETS } from "@kazam/shared/constants";
 import { bets, users, markets, marketOptions } from "@kazam/shared/schema";
 import { eq, and, sql } from "drizzle-orm";
@@ -56,7 +56,7 @@ export async function settleMarket(
   const winningOption = options.find((o) => o.id === winningOptionId);
   if (!winningOption) return { error: "Winning option not found" };
 
-  // Mark winning option (for display purposes)
+  // Mark winning option (for display)
   for (const opt of options) {
     await db
       .update(marketOptions)
@@ -70,47 +70,50 @@ export async function settleMarket(
   const losers: SettlementResult["losers"] = [];
 
   const alertTime = Date.now();
-
-  // For WHEN markets: each bet is evaluated based on time from placed_at to alert
   const isWhenMarket = market.type === "when";
 
-  // Get all bets for this market
-  for (const opt of options) {
-    const optBets = await getBetsForMarketOption(db, marketId, opt.id);
+  if (isWhenMarket) {
+    // === WHEN MARKET: per-bet evaluation ===
+    // Pass 1: collect all bets and determine winners
+    const allBets: Array<{
+      bet: { id: number; user_id: number; amount: number; placed_at: string };
+      optSortOrder: number;
+      isWin: boolean;
+    }> = [];
 
-    for (const bet of optBets) {
-      let isWin: boolean;
-
-      if (isWhenMarket) {
-        // Per-bet evaluation: elapsed = alert time - bet placed_at
+    for (const opt of options) {
+      const optBets = await getBetsForMarketOption(db, marketId, opt.id);
+      for (const bet of optBets) {
         const betPlacedAt = new Date(bet.placed_at).getTime();
         const elapsed = alertTime - betPlacedAt;
         const bucketIndex = opt.sort_order;
-
+        let isWin = false;
         if (bucketIndex < WHEN_BUCKETS.length) {
           const bucket = WHEN_BUCKETS[bucketIndex];
           isWin = elapsed >= bucket.min_ms && elapsed < bucket.max_ms;
-        } else {
-          isWin = false;
         }
-      } else {
-        // Standard: option matches winning option
-        isWin = opt.id === winningOptionId;
+        allBets.push({ bet, optSortOrder: opt.sort_order, isWin });
       }
+    }
 
+    // Calculate total winning amount for payout split
+    const totalWinningAmount = allBets
+      .filter((b) => b.isWin)
+      .reduce((sum, b) => sum + b.bet.amount, 0);
+
+    // Pass 2: calculate payouts and update
+    for (const { bet, isWin } of allBets) {
       let payout = 0;
 
-      if (isWin) {
-        payout = calculatePayout(
+      if (isWin && totalWinningAmount > 0) {
+        payout = calculateWhenPayout(
           bet.amount,
           market.total_pool,
-          winningOption.total_amount,
+          totalWinningAmount,
           options.length,
         );
-        // Credit winner
         await updateUserCoins(db, bet.user_id, payout, "earned");
 
-        // Update user stats
         await db
           .update(users)
           .set({
@@ -122,21 +125,11 @@ export async function settleMarket(
           .where(eq(users.id, bet.user_id))
           .run();
 
-        const user = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, bet.user_id))
-          .get();
-
+        const user = await db.select().from(users).where(eq(users.id, bet.user_id)).get();
         if (user) {
-          winners.push({
-            user_id: bet.user_id,
-            telegram_id: user.telegram_id,
-            payout,
-          });
+          winners.push({ user_id: bet.user_id, telegram_id: user.telegram_id, payout });
         }
       } else {
-        // Update loser stats
         await db
           .update(users)
           .set({
@@ -146,21 +139,65 @@ export async function settleMarket(
           .where(eq(users.id, bet.user_id))
           .run();
 
-        const user = await db
-          .select()
-          .from(users)
-          .where(eq(users.id, bet.user_id))
-          .get();
-
+        const user = await db.select().from(users).where(eq(users.id, bet.user_id)).get();
         if (user) {
-          losers.push({
-            user_id: bet.user_id,
-            telegram_id: user.telegram_id,
-          });
+          losers.push({ user_id: bet.user_id, telegram_id: user.telegram_id });
         }
       }
 
       await updateBetResult(db, bet.id, isWin, payout);
+    }
+  } else {
+    // === WHERE / HOW_MANY: standard parimutuel ===
+    for (const opt of options) {
+      const optBets = await getBetsForMarketOption(db, marketId, opt.id);
+
+      for (const bet of optBets) {
+        const isWin = opt.id === winningOptionId;
+        let payout = 0;
+
+        if (isWin) {
+          payout = calculatePayout(
+            bet.amount,
+            market.total_pool,
+            winningOption.total_amount,
+            options.length,
+          );
+          await updateUserCoins(db, bet.user_id, payout, "earned");
+
+          await db
+            .update(users)
+            .set({
+              correct_predictions: sql`${users.correct_predictions} + 1`,
+              total_predictions: sql`${users.total_predictions} + 1`,
+              current_streak: sql`${users.current_streak} + 1`,
+              longest_streak: sql`CASE WHEN ${users.current_streak} + 1 > ${users.longest_streak} THEN ${users.current_streak} + 1 ELSE ${users.longest_streak} END`,
+            })
+            .where(eq(users.id, bet.user_id))
+            .run();
+
+          const user = await db.select().from(users).where(eq(users.id, bet.user_id)).get();
+          if (user) {
+            winners.push({ user_id: bet.user_id, telegram_id: user.telegram_id, payout });
+          }
+        } else {
+          await db
+            .update(users)
+            .set({
+              total_predictions: sql`${users.total_predictions} + 1`,
+              current_streak: 0,
+            })
+            .where(eq(users.id, bet.user_id))
+            .run();
+
+          const user = await db.select().from(users).where(eq(users.id, bet.user_id)).get();
+          if (user) {
+            losers.push({ user_id: bet.user_id, telegram_id: user.telegram_id });
+          }
+        }
+
+        await updateBetResult(db, bet.id, isWin, payout);
+      }
     }
   }
 

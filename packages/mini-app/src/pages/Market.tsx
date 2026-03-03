@@ -71,7 +71,7 @@ export function Market() {
           onClick={() => navigate(-1)}
           className="mb-3 text-sm text-text-muted"
         >
-          חזרה →
+          → חזרה
         </button>
 
         <div className="glass-card mb-4">
