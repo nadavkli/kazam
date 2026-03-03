@@ -129,6 +129,7 @@ export function createMarketOption(
     label: string;
     label_en: string;
     sort_order: number;
+    seed_amount?: number;
   },
 ) {
   return db.insert(marketOptions).values(data).returning().get();
@@ -295,6 +296,11 @@ export function getAlertByHash(db: Database, hash: string) {
 
 export function getLatestAlert(db: Database) {
   return db.select().from(alerts).orderBy(desc(alerts.received_at)).limit(1).get();
+}
+
+/** Get the last N alerts for historical frequency analysis */
+export function getRecentAlerts(db: Database, limit: number) {
+  return db.select({ regions: alerts.regions }).from(alerts).orderBy(desc(alerts.received_at)).limit(limit).all();
 }
 
 export function listAlerts(

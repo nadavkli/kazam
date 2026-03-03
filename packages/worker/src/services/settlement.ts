@@ -72,6 +72,9 @@ export async function settleMarket(
   const alertTime = Date.now();
   const isWhenMarket = market.type === "when";
 
+  // Pre-compute seed totals for payout calculations
+  const totalSeeds = options.reduce((sum, o) => sum + (o.seed_amount ?? 100), 0);
+
   if (isWhenMarket) {
     // === WHEN MARKET: per-bet evaluation ===
     // Pass 1: collect all bets and determine winners
@@ -111,6 +114,7 @@ export async function settleMarket(
           market.total_pool,
           totalWinningAmount,
           options.length,
+          totalSeeds,
         );
         await updateUserCoins(db, bet.user_id, payout, "earned");
 
@@ -162,6 +166,8 @@ export async function settleMarket(
             market.total_pool,
             winningOption.total_amount,
             options.length,
+            winningOption.seed_amount ?? 100,
+            totalSeeds,
           );
           await updateUserCoins(db, bet.user_id, payout, "earned");
 
@@ -204,27 +210,48 @@ export async function settleMarket(
   // Resolve market
   await resolveMarket(db, marketId, winningOptionId, alertId);
 
-  // Build notifications
+  // Build consolidated notifications: ONE per user per market
   const mkt = await getMarketById(db, marketId);
   const winOpt = options.find((o) => o.id === winningOptionId);
 
+  // Aggregate per user: sum payouts from winning bets
+  const userPayouts = new Map<number, { telegram_id: number; totalPayout: number }>();
   for (const w of winners) {
+    const existing = userPayouts.get(w.user_id);
+    if (existing) {
+      existing.totalPayout += w.payout;
+    } else {
+      userPayouts.set(w.user_id, { telegram_id: w.telegram_id, totalPayout: w.payout });
+    }
+  }
+
+  // Collect loser user_ids (only users with NO winning bets)
+  const loserUsers = new Map<number, number>(); // user_id -> telegram_id
+  for (const l of losers) {
+    if (!userPayouts.has(l.user_id)) {
+      loserUsers.set(l.user_id, l.telegram_id);
+    }
+  }
+
+  // One win notification per winning user (consolidated payout)
+  for (const [userId, { telegram_id, totalPayout }] of userPayouts) {
     notifications.push({
       type: "bet_result",
-      user_id: w.user_id,
-      telegram_id: w.telegram_id,
+      user_id: userId,
+      telegram_id,
       market_question: mkt?.question ?? "",
       option_label: winOpt?.label ?? "",
       is_win: true,
-      payout: w.payout,
+      payout: totalPayout,
     });
   }
 
-  for (const l of losers) {
+  // One loss notification per losing user
+  for (const [userId, telegram_id] of loserUsers) {
     notifications.push({
       type: "bet_result",
-      user_id: l.user_id,
-      telegram_id: l.telegram_id,
+      user_id: userId,
+      telegram_id,
       market_question: mkt?.question ?? "",
       option_label: winOpt?.label ?? "",
       is_win: false,

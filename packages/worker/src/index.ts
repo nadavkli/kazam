@@ -3,12 +3,16 @@ import { cors } from "hono/cors";
 import { apiRouter } from "./api/router.js";
 import { handleBotWebhook } from "./bot/index.js";
 import { createDb } from "@kazam/db";
+import type { Database } from "@kazam/db";
 import { AlertPoller as AlertPollerDO } from "./durable-objects/alert-poller.js";
 import { handleNotificationBatch } from "./queues/notifications.js";
 import {
   maybeCreateWhereMarket,
   maybeCreateWhenMarket,
   maybeCreateHowManyMarket,
+  maybeCreateWarDurationMarket,
+  maybeCreateAlertTypeMarket,
+  maybeCreateIntensityMarket,
   settleExpiredHowManyMarkets,
 } from "./services/market.js";
 import { settleMarket } from "./services/settlement.js";
@@ -19,6 +23,7 @@ export interface Env {
   DB: D1Database;
   ALERT_POLLER: DurableObjectNamespace;
   NOTIFICATION_QUEUE: Queue;
+  ALERTS_CACHE: KVNamespace;
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_BOT_SECRET: string;
   MINI_APP_URL: string;
@@ -57,11 +62,13 @@ app.post("/bot/webhook", async (c) => {
 app.get("/health", (c) => c.json({ status: "ok", ts: Date.now() }));
 
 // Alert poller management endpoint (called once to initialize)
+// Uses locationHint "eeur" to pin the DO to Israel/TLV — required for oref.org.il geo-restriction
+const POLLER_DO_NAME = "poller-il";
 app.post("/internal/start-poller", async (c) => {
-  const id = c.env.ALERT_POLLER.idFromName("singleton");
-  const stub = c.env.ALERT_POLLER.get(id);
+  const id = c.env.ALERT_POLLER.idFromName(POLLER_DO_NAME);
+  const stub = c.env.ALERT_POLLER.get(id, { locationHint: "eeur" });
   await stub.fetch(new Request("https://internal/start"));
-  return c.json({ ok: true, message: "Alert poller started" });
+  return c.json({ ok: true, message: "Alert poller started (location: eeur)" });
 });
 
 // Seed initial markets
@@ -69,17 +76,27 @@ app.post("/internal/seed-markets", async (c) => {
   const db = createDb(c.env.DB);
   const results: string[] = [];
 
-  const where = await maybeCreateWhereMarket(db);
-  if (where) results.push(`WHERE market #${where.id} created`);
-  else results.push("WHERE market already exists or cooldown active");
+  const creators: Array<{ name: string; fn: (db: Database) => Promise<unknown> }> = [
+    { name: "WHERE", fn: maybeCreateWhereMarket },
+    { name: "WHEN", fn: maybeCreateWhenMarket },
+    { name: "HOW_MANY", fn: maybeCreateHowManyMarket },
+    { name: "WAR_DURATION", fn: maybeCreateWarDurationMarket },
+    { name: "ALERT_TYPE", fn: maybeCreateAlertTypeMarket },
+    { name: "INTENSITY", fn: maybeCreateIntensityMarket },
+  ];
 
-  const when = await maybeCreateWhenMarket(db);
-  if (when) results.push(`WHEN market #${when.id} created`);
-  else results.push("WHEN market already exists");
-
-  const howMany = await maybeCreateHowManyMarket(db);
-  if (howMany) results.push(`HOW_MANY market #${howMany.id} created`);
-  else results.push("HOW_MANY market already exists");
+  for (const { name, fn } of creators) {
+    try {
+      const m = await fn(db);
+      if (m && typeof m === "object" && "id" in m) {
+        results.push(`${name} market #${(m as { id: number }).id} created`);
+      } else {
+        results.push(`${name}: already exists or cooldown active`);
+      }
+    } catch (err) {
+      results.push(`${name}: ERROR - ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 
   return c.json({ ok: true, results });
 });
@@ -106,16 +123,14 @@ app.post("/internal/settle", async (c) => {
 });
 
 // Trigger a simulated alert (for demo/testing)
+// Mirrors the full alert-poller logic: settle WHERE + WHEN, update daily counts, create new markets
 app.post("/internal/simulate-alert", async (c) => {
   const db = createDb(c.env.DB);
   const body = await c.req.json() as { cities: string[] };
 
-  // Forward to alert proxy's trigger endpoint
-  const id = c.env.ALERT_POLLER.idFromName("singleton");
-  const stub = c.env.ALERT_POLLER.get(id);
-  // Just process directly: insert alert, settle markets, create new ones
   const { citiesToRegions, primaryRegion } = await import("@kazam/shared/regions");
-  const { insertAlert, getAlertByHash, getOpenMarketByType, getMarketOptions } = await import("@kazam/db/queries");
+  const { insertAlert, getOpenMarketByType, getMarketOptions, upsertDailyCount } = await import("@kazam/db/queries");
+  const { IST_TIMEZONE, WHEN_BUCKETS } = await import("@kazam/shared/constants");
 
   const cities = body.cities;
   const regions = citiesToRegions(cities);
@@ -135,6 +150,19 @@ app.post("/internal/simulate-alert", async (c) => {
 
   const results: string[] = [`Alert #${alert.id} created (regions: ${regions.join(", ")})`];
 
+  // Update daily alert count
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: IST_TIMEZONE });
+  const regionCounts: Record<string, number> = {};
+  for (const r of regions) {
+    regionCounts[r] = (regionCounts[r] ?? 0) + 1;
+  }
+  await upsertDailyCount(db, today, {
+    missile_count: 1,
+    total_count: 1,
+    regions: regionCounts,
+  });
+  results.push(`Daily count updated for ${today}`);
+
   // Settle WHERE market
   const whereMarket = await getOpenMarketByType(db, "where");
   if (whereMarket) {
@@ -152,15 +180,65 @@ app.post("/internal/simulate-alert", async (c) => {
         } else {
           results.push(`WHERE settlement error: ${settlement.error}`);
         }
+      } else {
+        results.push(`WHERE: no matching option for region "${primary}"`);
       }
+    } else {
+      results.push("WHERE: no primary region found for given cities");
     }
+  } else {
+    results.push("WHERE: no open market to settle");
   }
 
-  // Create new markets
+  // Settle WHEN market
+  const whenMarket = await getOpenMarketByType(db, "when");
+  if (whenMarket) {
+    const now = Date.now();
+    const elapsed = now - new Date(whenMarket.opens_at).getTime();
+    const options = await getMarketOptions(db, whenMarket.id);
+
+    // Find representative bucket for display (actual per-bet evaluation happens in settlement)
+    const bucketIdx = WHEN_BUCKETS.findIndex(b => elapsed < b.max_ms);
+    const winOpt = options[bucketIdx >= 0 ? bucketIdx : options.length - 1];
+
+    if (winOpt) {
+      const settlement = await settleMarket(db, whenMarket.id, winOpt.id, alert.id);
+      if (!("error" in settlement)) {
+        results.push(`WHEN market #${whenMarket.id} settled -> ${winOpt.label_en} (${settlement.winners.length} winners, ${settlement.losers.length} losers)`);
+        for (const n of settlement.notifications) {
+          await c.env.NOTIFICATION_QUEUE.send(n);
+        }
+      } else {
+        results.push(`WHEN settlement error: ${settlement.error}`);
+      }
+    }
+  } else {
+    results.push("WHEN: no open market to settle");
+  }
+
+  // Queue alert notification
+  await c.env.NOTIFICATION_QUEUE.send({
+    type: "alert",
+    alert: {
+      id: alert.id,
+      external_id: alert.external_id,
+      type: alert.type,
+      cities: alert.cities as string[],
+      regions: alert.regions as string[],
+      instructions: alert.instructions,
+      dedupe_hash: alert.dedupe_hash,
+      received_at: alert.received_at,
+    },
+  });
+  results.push("Alert notification queued");
+
+  // Create new markets after settlement
   const newWhere = await maybeCreateWhereMarket(db);
   if (newWhere) results.push(`New WHERE market #${newWhere.id} created`);
   const newWhen = await maybeCreateWhenMarket(db);
   if (newWhen) results.push(`New WHEN market #${newWhen.id} created`);
+  const newHowMany = await maybeCreateHowManyMarket(db);
+  if (newHowMany) results.push(`New HOW_MANY market #${newHowMany.id} created`);
 
   return c.json({ ok: true, results });
 });

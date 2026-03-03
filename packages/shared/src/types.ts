@@ -3,7 +3,7 @@ import type { AchievementType } from "./constants.js";
 
 // ====== Market Types ======
 
-export type MarketType = "where" | "when" | "how_many";
+export type MarketType = "where" | "when" | "how_many" | "war_duration" | "alert_type" | "intensity";
 
 export type MarketStatus =
   | "open"

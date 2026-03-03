@@ -57,7 +57,13 @@ async function sendAlertNotification(
     `🚨 *אזעקה!*\n\n` +
     `📍 ${regionNames}\n` +
     `🏙️ ${cityStr}\n\n` +
-    `⚡ יש שווקים פתוחים — בואו לנחש!`;
+    `⚡ יש הימורים פתוחים — בואו לנחש!`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🎲 המר עכשיו!", callback_data: "bet:start" }],
+    ],
+  };
 
   // Broadcast to all users
   const db = createDb(env.DB);
@@ -65,7 +71,7 @@ async function sendAlertNotification(
 
   for (const user of users) {
     try {
-      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text);
+      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
     } catch {
       // Skip users who blocked the bot
     }
@@ -106,18 +112,29 @@ async function sendMarketOpenedNotification(
 ): Promise<void> {
   const { market } = notification;
 
-  const typeEmoji = market.type === "where" ? "📍" : market.type === "when" ? "⏰" : "🔢";
+  const emojiMap: Record<string, string> = {
+    where: "📍", when: "⏰", how_many: "🔢",
+    war_duration: "⚔️", alert_type: "🎯", intensity: "📊",
+  };
+  const typeEmoji = emojiMap[market.type] ?? "🎲";
   const text =
-    `${typeEmoji} *שוק חדש נפתח!*\n\n` +
+    `${typeEmoji} *הימור חדש נפתח!*\n\n` +
     `🎯 ${market.question}\n\n` +
-    `השתמש ב /bet כדי להמר עכשיו!`;
+    `לחץ למטה כדי להמר עכשיו! 👇`;
+
+  // Inline keyboard with bet button
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🎲 המר עכשיו!", callback_data: `bet:market:${market.id}` }],
+    ],
+  };
 
   const db = createDb(env.DB);
   const users = await getAllUsers(db);
 
   for (const user of users) {
     try {
-      await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text);
+      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
     } catch {
       // Skip users who blocked the bot
     }
@@ -130,15 +147,28 @@ async function sendTelegramMessage(
   text: string,
   parseMode = "Markdown",
 ): Promise<void> {
+  await sendTelegramMessageWithKeyboard(botToken, chatId, text, undefined, parseMode);
+}
+
+async function sendTelegramMessageWithKeyboard(
+  botToken: string,
+  chatId: number,
+  text: string,
+  replyMarkup?: object,
+  parseMode = "Markdown",
+): Promise<void> {
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+  const body: Record<string, unknown> = {
+    chat_id: chatId,
+    text,
+    parse_mode: parseMode,
+  };
+  if (replyMarkup) body.reply_markup = replyMarkup;
+
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: parseMode,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

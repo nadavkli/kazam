@@ -51,6 +51,15 @@ function createBot(env: Env): Bot<BotContext> {
   bot.callbackQuery(/^bet:/, handleBetFlowCallback);
   bot.callbackQuery(/^confirm:/, handleConfirmCallback);
 
+  // Copy referral link callback — sends link as plain text for easy copying
+  bot.callbackQuery(/^copy_referral_/, async (ctx) => {
+    const code = ctx.callbackQuery.data.replace("copy_referral_", "");
+    const botUsername = ctx.me.username;
+    const link = `https://t.me/${botUsername}?start=ref_${code}`;
+    await ctx.answerCallbackQuery();
+    await ctx.reply(link);
+  });
+
   return bot;
 }
 

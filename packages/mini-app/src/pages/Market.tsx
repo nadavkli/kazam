@@ -50,7 +50,7 @@ export function Market() {
     return (
       <div className="p-4 text-center">
         <div className="text-2xl">🤷</div>
-        <div className="text-text-muted">שוק לא נמצא</div>
+        <div className="text-text-muted">הימור לא נמצא</div>
       </div>
     );
   }
@@ -59,6 +59,9 @@ export function Market() {
     where: "📍",
     when: "⏰",
     how_many: "🔢",
+    war_duration: "⚔️",
+    alert_type: "🎯",
+    intensity: "📊",
   };
 
   const selectedOpt = market.options.find((o) => o.id === selectedOption);

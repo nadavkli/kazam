@@ -23,6 +23,9 @@ const TYPE_EMOJI: Record<string, string> = {
   where: "📍",
   when: "⏰",
   how_many: "🔢",
+  war_duration: "⚔️",
+  alert_type: "🎯",
+  intensity: "📊",
 };
 
 export function MarketCard({

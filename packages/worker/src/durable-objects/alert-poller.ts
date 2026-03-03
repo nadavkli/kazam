@@ -18,15 +18,20 @@ import {
   maybeCreateWhereMarket,
   maybeCreateWhenMarket,
   maybeCreateHowManyMarket,
+  maybeCreateAlertTypeMarket,
+  maybeCreateIntensityMarket,
+  maybeCreateWarDurationMarket,
 } from "../services/market.js";
+import { ALERT_TYPE_OPTIONS } from "@kazam/shared/constants";
 import type { Env } from "../index.js";
-import type { OrefAlertRaw, NotificationMessage } from "@kazam/shared/types";
+import type { OrefAlertRaw, NotificationMessage, Market } from "@kazam/shared/types";
 
 interface AlertPollerState {
   recentHashes: Map<string, number>; // hash -> timestamp
   alertsThisHour: number;
   hourStart: number;
   sensitivityMode: boolean;
+  lastMarketCheck: number;
 }
 
 export class AlertPoller implements DurableObject {
@@ -42,6 +47,7 @@ export class AlertPoller implements DurableObject {
       alertsThisHour: 0,
       hourStart: Date.now(),
       sensitivityMode: false,
+      lastMarketCheck: 0,
     };
   }
 
@@ -65,10 +71,42 @@ export class AlertPoller implements DurableObject {
   }
 
   async alarm(): Promise<void> {
+    console.log("[POLLER] alarm fired");
     try {
       await this.pollAlerts();
     } catch (err) {
-      console.error("Alert poller error:", err);
+      console.error("[POLLER] alarm error:", err);
+    }
+
+    // Periodically check if markets need to be created (every 5 minutes)
+    const now = Date.now();
+    if (!this.pollerState.lastMarketCheck || now - this.pollerState.lastMarketCheck > 300_000) {
+      this.pollerState.lastMarketCheck = now;
+      try {
+        const db = createDb(this.env.DB);
+        const creators = [
+          { fn: maybeCreateWhereMarket, label: "WHERE" },
+          { fn: maybeCreateWhenMarket, label: "WHEN" },
+          { fn: maybeCreateAlertTypeMarket, label: "ALERT_TYPE" },
+        ];
+        for (const { fn, label } of creators) {
+          const m = await fn(db);
+          if (m) {
+            console.log(`[POLLER] Created new ${label} market #${m.id}`);
+            const opts = await getMarketOptions(db, m.id);
+            await this.env.NOTIFICATION_QUEUE.send({
+              type: "market_opened",
+              market: m,
+              options: opts,
+            } satisfies NotificationMessage);
+          }
+        }
+        await maybeCreateHowManyMarket(db);
+        await maybeCreateIntensityMarket(db);
+        await maybeCreateWarDurationMarket(db);
+      } catch (err) {
+        console.error("Market creation check error:", err);
+      }
     }
 
     // Schedule next poll
@@ -91,23 +129,22 @@ export class AlertPoller implements DurableObject {
       this.pollerState.sensitivityMode = false;
     }
 
-    // Fetch alerts from proxy
+    // Read alerts from KV cache (populated by alert-proxy cron from Israeli colo)
     let rawAlerts: OrefAlertRaw[];
     try {
-      const response = await fetch(this.env.ALERT_PROXY_URL, {
-        headers: { "Accept": "application/json" },
-        cf: { cacheTtl: 0 },
-      });
-      if (!response.ok) {
-        console.error(`Alert proxy returned ${response.status}`);
-        return;
+      const text = await this.env.ALERTS_CACHE.get("latest_alert");
+      if (!text || text.trim() === "" || text.trim() === "[]" || text.trim() === "null") {
+        return; // No active alerts
       }
-      const text = await response.text();
-      if (!text || text.trim() === "") return;
-      rawAlerts = JSON.parse(text);
-      if (!Array.isArray(rawAlerts)) return;
-    } catch {
-      // API may return empty when no alerts
+
+      const cleaned = text.replace(/^\uFEFF/, "").trim();
+      const parsed = JSON.parse(cleaned);
+      rawAlerts = Array.isArray(parsed) ? parsed : [parsed];
+      rawAlerts = rawAlerts.filter((a) => a && a.data);
+      if (rawAlerts.length === 0) return;
+      console.log(`[POLLER] Got ${rawAlerts.length} alert(s) from KV, cat=${rawAlerts[0]?.cat}, cities=${rawAlerts[0]?.data?.length}`);
+    } catch (err) {
+      console.error("[POLLER] KV/parse error:", err);
       return;
     }
 
@@ -127,12 +164,20 @@ export class AlertPoller implements DurableObject {
         .join("");
 
       // Skip if seen recently
-      if (this.pollerState.recentHashes.has(hash)) continue;
+      if (this.pollerState.recentHashes.has(hash)) {
+        console.log(`[POLLER] Skipping (recent hash): ${hash.slice(0, 8)}`);
+        continue;
+      }
       this.pollerState.recentHashes.set(hash, now);
 
       // Skip if already in DB
       const existing = await getAlertByHash(db, hash);
-      if (existing) continue;
+      if (existing) {
+        console.log(`[POLLER] Skipping (already in DB): ${hash.slice(0, 8)}`);
+        continue;
+      }
+
+      console.log(`[POLLER] NEW ALERT: cat=${raw.cat}, cities=${cities.join(",")}`);
 
       // Process new alert
       const regions = citiesToRegions(cities);
@@ -233,6 +278,24 @@ export class AlertPoller implements DurableObject {
         }
       }
 
+      // Resolve ALERT_TYPE market
+      const alertTypeMarket = await getOpenMarketByType(db, "alert_type");
+      if (alertTypeMarket) {
+        const options = await getMarketOptions(db, alertTypeMarket.id);
+        // Match alert cat to option
+        const matchIdx = ALERT_TYPE_OPTIONS.findIndex((o) => o.cat === raw.cat);
+        // If no exact match, use "Other" (last option)
+        const winOpt = matchIdx >= 0 ? options[matchIdx] : options[options.length - 1];
+        if (winOpt) {
+          const result = await settleMarket(db, alertTypeMarket.id, winOpt.id, alert.id);
+          if (!("error" in result)) {
+            for (const n of result.notifications) {
+              await this.env.NOTIFICATION_QUEUE.send(n);
+            }
+          }
+        }
+      }
+
       // Enqueue alert notification
       await this.env.NOTIFICATION_QUEUE.send({
         type: "alert",
@@ -249,27 +312,26 @@ export class AlertPoller implements DurableObject {
       } satisfies NotificationMessage);
 
       // Create new markets after settlement and notify
+      const newMarkets: Array<{ market: Market; label: string }> = [];
       const newWhere = await maybeCreateWhereMarket(db);
-      if (newWhere) {
-        const { getMarketOptions: getOpts } = await import("@kazam/db/queries");
-        const opts = await getOpts(db, newWhere.id);
-        await this.env.NOTIFICATION_QUEUE.send({
-          type: "market_opened",
-          market: newWhere,
-          options: opts,
-        } satisfies NotificationMessage);
-      }
+      if (newWhere) newMarkets.push({ market: newWhere, label: "WHERE" });
       const newWhen = await maybeCreateWhenMarket(db);
-      if (newWhen) {
-        const { getMarketOptions: getOpts } = await import("@kazam/db/queries");
-        const opts = await getOpts(db, newWhen.id);
+      if (newWhen) newMarkets.push({ market: newWhen, label: "WHEN" });
+      const newAlertType = await maybeCreateAlertTypeMarket(db);
+      if (newAlertType) newMarkets.push({ market: newAlertType, label: "ALERT_TYPE" });
+      await maybeCreateHowManyMarket(db);
+      await maybeCreateIntensityMarket(db);
+      await maybeCreateWarDurationMarket(db);
+
+      for (const { market: m, label } of newMarkets) {
+        console.log(`[POLLER] Created new ${label} market #${m.id}`);
+        const opts = await getMarketOptions(db, m.id);
         await this.env.NOTIFICATION_QUEUE.send({
           type: "market_opened",
-          market: newWhen,
+          market: m,
           options: opts,
         } satisfies NotificationMessage);
       }
-      await maybeCreateHowManyMarket(db);
     }
   }
 }

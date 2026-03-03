@@ -31,7 +31,7 @@ export const markets = sqliteTable(
   "markets",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    type: text("type", { enum: ["where", "when", "how_many"] }).notNull(),
+    type: text("type", { enum: ["where", "when", "how_many", "war_duration", "alert_type", "intensity"] }).notNull(),
     question: text("question").notNull(),
     question_en: text("question_en").notNull(),
     status: text("status", {
@@ -67,6 +67,7 @@ export const marketOptions = sqliteTable(
     total_amount: integer("total_amount").notNull().default(0),
     is_winner: integer("is_winner", { mode: "boolean" }),
     sort_order: integer("sort_order").notNull().default(0),
+    seed_amount: integer("seed_amount").notNull().default(100),
   },
   (table) => [index("market_options_market_idx").on(table.market_id)],
 );

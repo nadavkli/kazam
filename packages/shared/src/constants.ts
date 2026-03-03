@@ -63,6 +63,32 @@ export const HOW_MANY_BUCKETS = [
   { label: "20+", label_en: "20+", min: 21, max: Infinity },
 ] as const;
 
+/** War duration market buckets */
+export const WAR_DURATION_BUCKETS = [
+  { label: "עד שבוע", label_en: "< 1 week", min_days: 0, max_days: 7 },
+  { label: "1-2 שבועות", label_en: "1-2 weeks", min_days: 7, max_days: 14 },
+  { label: "2-4 שבועות", label_en: "2-4 weeks", min_days: 14, max_days: 28 },
+  { label: "1-3 חודשים", label_en: "1-3 months", min_days: 28, max_days: 90 },
+  { label: "3-6 חודשים", label_en: "3-6 months", min_days: 90, max_days: 180 },
+  { label: "מעל 6 חודשים", label_en: "6+ months", min_days: 180, max_days: Infinity },
+] as const;
+
+/** Alert type market options */
+export const ALERT_TYPE_OPTIONS = [
+  { label: "רקטות וטילים", label_en: "Rockets/Missiles", cat: "1" },
+  { label: "חדירת כלי טיס", label_en: "Hostile Aircraft/UAV", cat: "6" },
+  { label: "חדירת מחבלים", label_en: "Terrorist Infiltration", cat: "terroristInfiltration" },
+  { label: "רעידת אדמה", label_en: "Earthquake", cat: "earthquake" },
+  { label: "אחר", label_en: "Other", cat: "other" },
+] as const;
+
+/** Intensity comparison market options */
+export const INTENSITY_OPTIONS = [
+  { label: "יותר", label_en: "More" },
+  { label: "אותו דבר", label_en: "Same" },
+  { label: "פחות", label_en: "Less" },
+] as const;
+
 /** Achievement types */
 export const ACHIEVEMENT_TYPES = [
   "first_bet",

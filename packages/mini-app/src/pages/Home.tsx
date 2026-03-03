@@ -58,7 +58,7 @@ export function Home() {
 
       {/* Active markets */}
       <div className="px-4 pt-4">
-        <h2 className="mb-3 text-base font-bold">🎯 שווקים פעילים</h2>
+        <h2 className="mb-3 text-base font-bold">🎯 הימורים פעילים</h2>
 
         {isLoading ? (
           <div className="space-y-3">
@@ -73,10 +73,10 @@ export function Home() {
           <div className="glass-card py-8 text-center">
             <div className="mb-2 text-3xl">😴</div>
             <div className="text-sm text-text-secondary">
-              אין שווקים פתוחים כרגע
+              אין הימורים פתוחים כרגע
             </div>
             <div className="text-xs text-text-muted">
-              שוק חדש ייפתח אחרי האזעקה הבאה
+              הימור חדש ייפתח אחרי האזעקה הבאה
             </div>
           </div>
         ) : (

@@ -32,5 +32,9 @@ max_batch_timeout = 5
 [triggers]
 crons = ["59 20 * * *"]
 
+[[kv_namespaces]]
+binding = "ALERTS_CACHE"
+id = "a187584d9d874a1ca7367d16427675e5"
+
 [vars]
 ENVIRONMENT = "production"

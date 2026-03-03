@@ -60,7 +60,7 @@ async function showMarketOptions(
 ): Promise<void> {
   const market = await getMarketById(ctx.db, marketId);
   if (!market || market.status !== "open") {
-    await ctx.reply("🔒 השוק סגור להימורים");
+    await ctx.reply("🔒 ההימור סגור");
     return;
   }
 
