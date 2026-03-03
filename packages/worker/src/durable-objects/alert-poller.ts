@@ -58,6 +58,10 @@ export class AlertPoller implements DurableObject {
       await this.state.storage.setAlarm(Date.now() + ALERT_POLL_INTERVAL_MS);
       return new Response(JSON.stringify({ ok: true, message: "Poller started" }));
     }
+    if (url.pathname === "/stop") {
+      await this.state.storage.deleteAlarm();
+      return new Response(JSON.stringify({ ok: true, message: "Poller stopped" }));
+    }
     if (url.pathname === "/status") {
       return new Response(
         JSON.stringify({

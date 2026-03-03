@@ -35,7 +35,7 @@ export const WHERE_MARKET_COOLDOWN_MS = 5 * 60 * 1000; // 5 min
 export const ALERT_DEDUP_WINDOW_MS = 60 * 1000; // 60s
 
 /** Alert poll interval (ms) */
-export const ALERT_POLL_INTERVAL_MS = 2000; // 2s
+export const ALERT_POLL_INTERVAL_MS = 10000; // 10s — balances real-time with Tzofar rate limits
 
 /** High alert threshold per hour for sensitivity mode */
 export const SENSITIVITY_THRESHOLD_PER_HOUR = 20;

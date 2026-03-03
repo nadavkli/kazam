@@ -71,6 +71,15 @@ app.post("/internal/start-poller", async (c) => {
   return c.json({ ok: true, message: "Alert poller started (location: eeur)" });
 });
 
+// Stop a DO poller by name
+app.post("/internal/stop-poller/:name", async (c) => {
+  const name = c.req.param("name");
+  const id = c.env.ALERT_POLLER.idFromName(name);
+  const stub = c.env.ALERT_POLLER.get(id);
+  await stub.fetch(new Request("https://internal/stop"));
+  return c.json({ ok: true, message: `Poller '${name}' stopped` });
+});
+
 // Seed initial markets
 app.post("/internal/seed-markets", async (c) => {
   const db = createDb(c.env.DB);
