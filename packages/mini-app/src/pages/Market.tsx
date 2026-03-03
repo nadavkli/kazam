@@ -71,7 +71,7 @@ export function Market() {
           onClick={() => navigate(-1)}
           className="mb-3 text-sm text-text-muted"
         >
-          ← חזרה
+          חזרה →
         </button>
 
         <div className="glass-card mb-4">
@@ -134,7 +134,7 @@ export function Market() {
                   }
                 />
                 {userBet && (
-                  <div className="mt-1 text-left text-xs text-accent-purple">
+                  <div className="mt-1 text-xs text-accent-purple">
                     הימרת {userBet.amount} 🪙
                   </div>
                 )}
