@@ -86,12 +86,14 @@ async function sendBetResultNotification(
       `🎯 ${market_question}\n` +
       `✅ תשובה: ${option_label}\n` +
       `💰 +${payout} מטבעות\n\n` +
-      `You called it! 🔥`;
+      `You called it! 🔥\n\n` +
+      `🤝 הזמן חברים עם /refer וקבל עוד 200 מטבעות!`;
   } else {
     text =
       `😔 *לא הפעם...*\n\n` +
       `🎯 ${market_question}\n` +
       `❌ התשובה הנכונה: ${option_label}\n\n` +
+      `נגמרו המטבעות? הזמן חבר עם /refer וקבל 200 מטבעות בונוס! 🤝\n` +
       `נסה שוב! בפעם הבאה תצליח 💪`;
   }
 
