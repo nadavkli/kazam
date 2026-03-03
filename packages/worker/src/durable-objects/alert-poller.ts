@@ -129,10 +129,46 @@ export class AlertPoller implements DurableObject {
       this.pollerState.sensitivityMode = false;
     }
 
-    // Read alerts from KV cache (populated by alert-proxy cron from Israeli colo)
+    // Poll Tzofar API directly (not geo-blocked, works from any colo)
+    // Fallback to KV cache if Tzofar fails
     let rawAlerts: OrefAlertRaw[];
     try {
-      const text = await this.env.ALERTS_CACHE.get("latest_alert");
+      let text: string | null = null;
+
+      // Primary: Tzofar API (real-time, ~2s latency)
+      try {
+        const res = await fetch("https://api.tzevaadom.co.il/notifications", {
+          headers: { Accept: "application/json" },
+          cf: { cacheTtl: 0 },
+        });
+        if (res.ok) {
+          const alerts = await res.json() as Array<{ notificationId: string; time: number; threat: number; isDrill: boolean; cities: string[] }>;
+          if (Array.isArray(alerts) && alerts.length > 0) {
+            const real = alerts.filter((a) => !a.isDrill && a.cities?.length > 0);
+            if (real.length > 0) {
+              const threatMap: Record<number, string> = { 0: "1", 1: "6", 2: "earthquake", 6: "terroristInfiltration" };
+              const orefFormat = real.map((a) => ({
+                id: a.notificationId,
+                cat: threatMap[a.threat] ?? "other",
+                title: "",
+                data: a.cities,
+                desc: "",
+              }));
+              text = JSON.stringify(orefFormat);
+              // Also update KV cache for consistency
+              await this.env.ALERTS_CACHE.put("latest_alert", text, { expirationTtl: 300 });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[POLLER] Tzofar fetch error, falling back to KV:", err);
+      }
+
+      // Fallback: KV cache (populated by proxy cron)
+      if (!text) {
+        text = await this.env.ALERTS_CACHE.get("latest_alert");
+      }
+
       if (!text || text.trim() === "" || text.trim() === "[]" || text.trim() === "null") {
         return; // No active alerts
       }
@@ -142,9 +178,9 @@ export class AlertPoller implements DurableObject {
       rawAlerts = Array.isArray(parsed) ? parsed : [parsed];
       rawAlerts = rawAlerts.filter((a) => a && a.data);
       if (rawAlerts.length === 0) return;
-      console.log(`[POLLER] Got ${rawAlerts.length} alert(s) from KV, cat=${rawAlerts[0]?.cat}, cities=${rawAlerts[0]?.data?.length}`);
+      console.log(`[POLLER] Got ${rawAlerts.length} alert(s), cat=${rawAlerts[0]?.cat}, cities=${rawAlerts[0]?.data?.length}`);
     } catch (err) {
-      console.error("[POLLER] KV/parse error:", err);
+      console.error("[POLLER] parse error:", err);
       return;
     }
 
