@@ -1,8 +1,10 @@
 import type { Env } from "../index.js";
 import type { NotificationMessage } from "@kazam/shared/types";
+import type { Database } from "@kazam/db";
 import { REGION_LABELS, type Region } from "@kazam/shared/regions";
 import { createDb } from "@kazam/db";
-import { getAllUsers } from "@kazam/db/queries";
+import { getAllUsers, getUsersWithoutDailyClaim } from "@kazam/db/queries";
+import { IST_TIMEZONE, DAILY_BONUS } from "@kazam/shared/constants";
 
 /**
  * Process notification queue messages — sends Telegram messages to users.
@@ -133,6 +135,45 @@ async function sendMarketOpenedNotification(
   const users = await getAllUsers(db);
 
   for (const user of users) {
+    try {
+      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
+    } catch {
+      // Skip users who blocked the bot
+    }
+  }
+}
+
+/**
+ * Send daily reminder to users who haven't claimed their bonus today.
+ * Called by cron at noon IST (09:00 UTC).
+ */
+export async function sendDailyReminders(
+  db: Database,
+  env: Env,
+): Promise<void> {
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: IST_TIMEZONE });
+  const users = await getUsersWithoutDailyClaim(db, today);
+
+  console.log(`[DAILY] Sending reminders to ${users.length} users`);
+
+  for (const user of users) {
+    const streakWarning = user.current_streak > 0
+      ? `\n🔥 יש לך רצף של ${user.current_streak} ימים! אל תפספס!`
+      : "";
+
+    const text =
+      `🎁 *לא שכחת לאסוף את הבונוס היומי?*\n\n` +
+      `💰 ${DAILY_BONUS} מטבעות מחכים לך!${streakWarning}\n\n` +
+      `👉 לחץ /daily לאיסוף\n\n` +
+      `🤝 הזמן חברים עם /refer וקבל 200 מטבעות בונוס לשניכם!`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: "🎁 אסוף בונוס יומי", callback_data: "daily_claim" }],
+        [{ text: "🤝 הזמן חבר", callback_data: "refer_friend" }],
+      ],
+    };
+
     try {
       await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
     } catch {

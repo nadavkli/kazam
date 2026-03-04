@@ -51,6 +51,18 @@ function createBot(env: Env): Bot<BotContext> {
   bot.callbackQuery(/^bet:/, handleBetFlowCallback);
   bot.callbackQuery(/^confirm:/, handleConfirmCallback);
 
+  // Daily claim callback (from reminder notification)
+  bot.callbackQuery("daily_claim", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleDaily(ctx);
+  });
+
+  // Refer friend callback (from reminder notification)
+  bot.callbackQuery("refer_friend", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleRefer(ctx);
+  });
+
   // Copy referral link callback — sends link as plain text for easy copying
   bot.callbackQuery(/^copy_referral_/, async (ctx) => {
     const code = ctx.callbackQuery.data.replace("copy_referral_", "");

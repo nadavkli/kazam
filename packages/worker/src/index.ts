@@ -5,7 +5,7 @@ import { handleBotWebhook } from "./bot/index.js";
 import { createDb } from "@kazam/db";
 import type { Database } from "@kazam/db";
 import { AlertPoller as AlertPollerDO } from "./durable-objects/alert-poller.js";
-import { handleNotificationBatch } from "./queues/notifications.js";
+import { handleNotificationBatch, sendDailyReminders } from "./queues/notifications.js";
 import {
   maybeCreateWhereMarket,
   maybeCreateWhenMarket,
@@ -255,14 +255,20 @@ app.post("/internal/simulate-alert", async (c) => {
 export default {
   fetch: app.fetch,
 
-  // Cron trigger: settle HOW_MANY markets at end of day
+  // Cron triggers
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     const db = createDb(env.DB);
-    const result = await settleExpiredHowManyMarkets(db);
-    console.log(`[CRON] Settled ${result.settled} HOW_MANY markets`);
-    // Queue notifications
-    for (const n of result.notifications) {
-      await env.NOTIFICATION_QUEUE.send(n);
+
+    if (event.cron === "0 9 * * *") {
+      // Noon IST (09:00 UTC) — daily reminder to claim bonus + refer friends
+      await sendDailyReminders(db, env);
+    } else {
+      // End of day IST (20:59 UTC) — settle daily markets
+      const result = await settleExpiredHowManyMarkets(db);
+      console.log(`[CRON] Settled ${result.settled} HOW_MANY markets`);
+      for (const n of result.notifications) {
+        await env.NOTIFICATION_QUEUE.send(n);
+      }
     }
   },
 

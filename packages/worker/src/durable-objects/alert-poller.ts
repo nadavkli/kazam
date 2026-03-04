@@ -151,11 +151,29 @@ export class AlertPoller implements DurableObject {
             const real = alerts.filter((a) => !a.isDrill && a.cities?.length > 0);
             if (real.length > 0) {
               const threatMap: Record<number, string> = { 0: "1", 1: "6", 2: "earthquake", 6: "terroristInfiltration" };
-              const orefFormat = real.map((a) => ({
-                id: a.notificationId,
-                cat: threatMap[a.threat] ?? "other",
+              // Group by threat type + 5-minute time bucket
+              // A barrage hitting 50 villages becomes ONE alert event
+              const BUCKET_SEC = 300; // 5 minutes
+              const grouped = new Map<string, { cat: string; bucket: number; cities: string[] }>();
+              for (const a of real) {
+                const cat = threatMap[a.threat] ?? "other";
+                const tSec = a.time > 1e12 ? Math.floor(a.time / 1000) : a.time;
+                const bucket = Math.floor(tSec / BUCKET_SEC);
+                const key = `${cat}:${bucket}`;
+                const g = grouped.get(key);
+                if (g) {
+                  for (const c of a.cities) {
+                    if (!g.cities.includes(c)) g.cities.push(c);
+                  }
+                } else {
+                  grouped.set(key, { cat, bucket, cities: [...a.cities] });
+                }
+              }
+              const orefFormat = [...grouped.values()].map((g) => ({
+                id: `${g.cat}_${g.bucket}`,
+                cat: g.cat,
                 title: "",
-                data: a.cities,
+                data: g.cities,
                 desc: "",
               }));
               text = JSON.stringify(orefFormat);
@@ -193,8 +211,10 @@ export class AlertPoller implements DurableObject {
     for (const raw of rawAlerts) {
       // Compute dedup hash
       const cities = Array.isArray(raw.data) ? raw.data : [];
-      const sortedCities = [...cities].sort();
-      const hashInput = `${raw.cat}:${sortedCities.join(",")}`;
+      // Grouped alerts use stable bucket ID (e.g. "1_5698563"), legacy use cities
+      const hashInput = raw.id?.includes("_")
+        ? `group:${raw.id}`
+        : `${raw.cat}:${[...cities].sort().join(",")}`;
       const hashBuffer = await crypto.subtle.digest(
         "SHA-256",
         new TextEncoder().encode(hashInput),

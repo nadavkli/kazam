@@ -58,17 +58,32 @@ async function fetchTzofar(): Promise<string> {
     const realAlerts = alerts.filter((a) => !a.isDrill && a.cities?.length > 0);
     if (realAlerts.length === 0) return "";
 
-    // Convert to OREF format for compatibility with existing DO code
-    const orefFormat: OrefAlert[] = realAlerts.map((a) => {
+    // Group by threat type + 5-minute time bucket (same logic as DO)
+    // Merges village-level alerts from a single barrage into one event
+    const BUCKET_SEC = 300;
+    const grouped = new Map<string, { cat: string; bucket: number; title: string; cities: string[] }>();
+    for (const a of realAlerts) {
       const mapping = THREAT_TO_CAT[a.threat] ?? { cat: "other", title: "התרעה" };
-      return {
-        id: a.notificationId,
-        cat: mapping.cat,
-        title: mapping.title,
-        data: a.cities,
-        desc: "היכנסו למרחב המוגן",
-      };
-    });
+      const tSec = a.time > 1e12 ? Math.floor(a.time / 1000) : a.time;
+      const bucket = Math.floor(tSec / BUCKET_SEC);
+      const key = `${mapping.cat}:${bucket}`;
+      const g = grouped.get(key);
+      if (g) {
+        for (const c of a.cities) {
+          if (!g.cities.includes(c)) g.cities.push(c);
+        }
+      } else {
+        grouped.set(key, { cat: mapping.cat, bucket, title: mapping.title, cities: [...a.cities] });
+      }
+    }
+
+    const orefFormat: OrefAlert[] = [...grouped.values()].map((g) => ({
+      id: `${g.cat}_${g.bucket}`,
+      cat: g.cat,
+      title: g.title,
+      data: g.cities,
+      desc: "היכנסו למרחב המוגן",
+    }));
 
     return JSON.stringify(orefFormat);
   } catch (err) {

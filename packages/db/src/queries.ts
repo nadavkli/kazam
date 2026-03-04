@@ -351,6 +351,16 @@ export function getAllUsers(db: Database) {
   return db.select({ id: users.id, telegram_id: users.telegram_id }).from(users).all();
 }
 
+export function getUsersWithoutDailyClaim(db: Database, today: string) {
+  return db
+    .select({ id: users.id, telegram_id: users.telegram_id, first_name: users.first_name, current_streak: users.current_streak })
+    .from(users)
+    .where(
+      sql`${users.last_daily_claim_at} IS NULL OR date(${users.last_daily_claim_at}) < ${today}`,
+    )
+    .all();
+}
+
 // ====== Leaderboard Queries ======
 
 export function getLeaderboard(
