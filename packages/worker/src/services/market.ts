@@ -2,6 +2,7 @@ import type { Database } from "@kazam/db";
 import {
   createMarket,
   createMarketOption,
+  setMarketPool,
   getOpenMarketByType,
   getLatestAlert,
   getRecentAlerts,
@@ -18,6 +19,7 @@ import {
   ALERT_TYPE_OPTIONS,
   INTENSITY_OPTIONS,
   IST_TIMEZONE,
+  OPTION_SEED_AMOUNT,
 } from "@kazam/shared/constants";
 import type { MarketType, Market, NotificationMessage } from "@kazam/shared/types";
 import { settleMarket } from "./settlement.js";
@@ -32,13 +34,11 @@ export async function maybeCreateWhereMarket(
   const existing = await getOpenMarketByType(db, "where");
   if (existing) return null;
 
-  // Check cooldown
+  // Cooldown after last alert (let users digest results before new market)
   const lastAlert = await getLatestAlert(db);
   if (lastAlert) {
     const alertTime = new Date(lastAlert.received_at).getTime();
-    if (Date.now() - alertTime < WHERE_MARKET_COOLDOWN_MS) {
-      return null;
-    }
+    if (Date.now() - alertTime < WHERE_MARKET_COOLDOWN_MS) return null;
   }
 
   const now = new Date().toISOString();
@@ -65,16 +65,15 @@ export async function maybeCreateWhereMarket(
   });
 
   // Create region options with weighted seeds based on historical frequency
-  // More hits = higher virtual seed = lower starting odds (reflects real probability)
   const BASE_SEED = 100;
+  let totalPool = 0;
   for (let i = 0; i < REGIONS.length; i++) {
     const region = REGIONS[i];
     const labels = REGION_LABELS[region];
     const hits = regionHits[region] ?? 0;
-    // Weight: regions with more history get proportionally higher seeds
-    // Min seed = BASE_SEED * 0.3 (never zero), scales up to BASE_SEED * 3 for dominant regions
     const weight = totalHits > 0 ? Math.max(0.3, (hits / totalHits) * REGIONS.length) : 1;
     const seed = Math.round(BASE_SEED * weight);
+    totalPool += seed;
 
     await createMarketOption(db, {
       market_id: market.id,
@@ -82,8 +81,10 @@ export async function maybeCreateWhereMarket(
       label_en: labels.en,
       sort_order: i,
       seed_amount: seed,
+      total_amount: seed,
     });
   }
+  await setMarketPool(db, market.id, totalPool);
 
   return market;
 }
@@ -97,6 +98,13 @@ export async function maybeCreateWhenMarket(
   const existing = await getOpenMarketByType(db, "when");
   if (existing) return null;
 
+  // Cooldown after last alert
+  const lastAlert = await getLatestAlert(db);
+  if (lastAlert) {
+    const alertTime = new Date(lastAlert.received_at).getTime();
+    if (Date.now() - alertTime < WHERE_MARKET_COOLDOWN_MS) return null;
+  }
+
   const now = new Date().toISOString();
   const farFuture = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
 
@@ -108,6 +116,7 @@ export async function maybeCreateWhenMarket(
     closes_at: farFuture,
   });
 
+  const seedPerOption = OPTION_SEED_AMOUNT;
   for (let i = 0; i < WHEN_BUCKETS.length; i++) {
     const bucket = WHEN_BUCKETS[i];
     await createMarketOption(db, {
@@ -115,8 +124,11 @@ export async function maybeCreateWhenMarket(
       label: bucket.label,
       label_en: bucket.label_en,
       sort_order: i,
+      seed_amount: seedPerOption,
+      total_amount: seedPerOption,
     });
   }
+  await setMarketPool(db, market.id, seedPerOption * WHEN_BUCKETS.length);
 
   return market;
 }
@@ -135,7 +147,6 @@ export async function maybeCreateHowManyMarket(
   });
 
   const now = new Date().toISOString();
-  // Closes at end of day IST
   const endOfDay = new Date(`${today}T23:59:59+03:00`).toISOString();
 
   const market = await createMarket(db, {
@@ -146,6 +157,7 @@ export async function maybeCreateHowManyMarket(
     closes_at: endOfDay,
   });
 
+  const seedPerOption = OPTION_SEED_AMOUNT;
   for (let i = 0; i < HOW_MANY_BUCKETS.length; i++) {
     const bucket = HOW_MANY_BUCKETS[i];
     await createMarketOption(db, {
@@ -153,8 +165,11 @@ export async function maybeCreateHowManyMarket(
       label: bucket.label,
       label_en: bucket.label_en,
       sort_order: i,
+      seed_amount: seedPerOption,
+      total_amount: seedPerOption,
     });
   }
+  await setMarketPool(db, market.id, seedPerOption * HOW_MANY_BUCKETS.length);
 
   return market;
 }
@@ -180,6 +195,7 @@ export async function maybeCreateWarDurationMarket(
     closes_at: farFuture,
   });
 
+  const seedPerOption = OPTION_SEED_AMOUNT;
   for (let i = 0; i < WAR_DURATION_BUCKETS.length; i++) {
     const bucket = WAR_DURATION_BUCKETS[i];
     await createMarketOption(db, {
@@ -187,15 +203,17 @@ export async function maybeCreateWarDurationMarket(
       label: bucket.label,
       label_en: bucket.label_en,
       sort_order: i,
+      seed_amount: seedPerOption,
+      total_amount: seedPerOption,
     });
   }
+  await setMarketPool(db, market.id, seedPerOption * WAR_DURATION_BUCKETS.length);
 
   return market;
 }
 
 /**
  * Create an ALERT_TYPE market - "What type will the next alert be?"
- * Auto-created after each alert resolves.
  */
 export async function maybeCreateAlertTypeMarket(
   db: Database,
@@ -203,12 +221,11 @@ export async function maybeCreateAlertTypeMarket(
   const existing = await getOpenMarketByType(db, "alert_type");
   if (existing) return null;
 
+  // Cooldown after last alert
   const lastAlert = await getLatestAlert(db);
   if (lastAlert) {
     const alertTime = new Date(lastAlert.received_at).getTime();
-    if (Date.now() - alertTime < WHERE_MARKET_COOLDOWN_MS) {
-      return null;
-    }
+    if (Date.now() - alertTime < WHERE_MARKET_COOLDOWN_MS) return null;
   }
 
   const now = new Date().toISOString();
@@ -222,6 +239,7 @@ export async function maybeCreateAlertTypeMarket(
     closes_at: farFuture,
   });
 
+  const seedPerOption = OPTION_SEED_AMOUNT;
   for (let i = 0; i < ALERT_TYPE_OPTIONS.length; i++) {
     const opt = ALERT_TYPE_OPTIONS[i];
     await createMarketOption(db, {
@@ -229,15 +247,17 @@ export async function maybeCreateAlertTypeMarket(
       label: opt.label,
       label_en: opt.label_en,
       sort_order: i,
+      seed_amount: seedPerOption,
+      total_amount: seedPerOption,
     });
   }
+  await setMarketPool(db, market.id, seedPerOption * ALERT_TYPE_OPTIONS.length);
 
   return market;
 }
 
 /**
  * Create a daily INTENSITY market - "More or fewer alerts than yesterday?"
- * Compares today's alert count vs yesterday's. Settles at end of day.
  */
 export async function maybeCreateIntensityMarket(
   db: Database,
@@ -249,7 +269,6 @@ export async function maybeCreateIntensityMarket(
     timeZone: IST_TIMEZONE,
   });
 
-  // Get yesterday's date
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toLocaleDateString("en-CA", {
     timeZone: IST_TIMEZONE,
   });
@@ -268,6 +287,7 @@ export async function maybeCreateIntensityMarket(
     closes_at: endOfDay,
   });
 
+  const seedPerOption = OPTION_SEED_AMOUNT;
   for (let i = 0; i < INTENSITY_OPTIONS.length; i++) {
     const opt = INTENSITY_OPTIONS[i];
     await createMarketOption(db, {
@@ -275,8 +295,11 @@ export async function maybeCreateIntensityMarket(
       label: opt.label,
       label_en: opt.label_en,
       sort_order: i,
+      seed_amount: seedPerOption,
+      total_amount: seedPerOption,
     });
   }
+  await setMarketPool(db, market.id, seedPerOption * INTENSITY_OPTIONS.length);
 
   return market;
 }

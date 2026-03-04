@@ -130,9 +130,18 @@ export function createMarketOption(
     label_en: string;
     sort_order: number;
     seed_amount?: number;
+    total_amount?: number;
   },
 ) {
   return db.insert(marketOptions).values(data).returning().get();
+}
+
+export function setMarketPool(db: Database, marketId: number, pool: number) {
+  return db
+    .update(markets)
+    .set({ total_pool: pool })
+    .where(eq(markets.id, marketId))
+    .run();
 }
 
 export function lockMarket(db: Database, marketId: number) {
