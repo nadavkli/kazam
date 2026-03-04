@@ -88,26 +88,21 @@ export class AlertPoller implements DurableObject {
       this.pollerState.lastMarketCheck = now;
       try {
         const db = createDb(this.env.DB);
-        const creators = [
-          { fn: maybeCreateWhereMarket, label: "WHERE" },
-          { fn: maybeCreateWhenMarket, label: "WHEN" },
-          { fn: maybeCreateAlertTypeMarket, label: "ALERT_TYPE" },
-        ];
-        for (const { fn, label } of creators) {
+        const newMarkets: Array<{ market: Market; options: Awaited<ReturnType<typeof getMarketOptions>> }> = [];
+        for (const fn of [maybeCreateWhereMarket, maybeCreateWhenMarket, maybeCreateAlertTypeMarket]) {
           const m = await fn(db);
-          if (m) {
-            console.log(`[POLLER] Created new ${label} market #${m.id}`);
-            const opts = await getMarketOptions(db, m.id);
-            await this.env.NOTIFICATION_QUEUE.send({
-              type: "market_opened",
-              market: m,
-              options: opts,
-            } satisfies NotificationMessage);
-          }
+          if (m) newMarkets.push({ market: m, options: await getMarketOptions(db, m.id) });
         }
         await maybeCreateHowManyMarket(db);
         await maybeCreateIntensityMarket(db);
         await maybeCreateWarDurationMarket(db);
+        if (newMarkets.length > 0) {
+          console.log(`[POLLER] Created ${newMarkets.length} new markets`);
+          await this.env.NOTIFICATION_QUEUE.send({
+            type: "markets_batch_opened",
+            markets: newMarkets,
+          } satisfies NotificationMessage);
+        }
       } catch (err) {
         console.error("Market creation check error:", err);
       }
@@ -371,25 +366,24 @@ export class AlertPoller implements DurableObject {
         },
       } satisfies NotificationMessage);
 
-      // Create new markets after settlement and notify
-      const newMarkets: Array<{ market: Market; label: string }> = [];
+      // Create new markets after settlement
+      const newMarkets: Array<{ market: Market; options: Awaited<ReturnType<typeof getMarketOptions>> }> = [];
       const newWhere = await maybeCreateWhereMarket(db);
-      if (newWhere) newMarkets.push({ market: newWhere, label: "WHERE" });
+      if (newWhere) newMarkets.push({ market: newWhere, options: await getMarketOptions(db, newWhere.id) });
       const newWhen = await maybeCreateWhenMarket(db);
-      if (newWhen) newMarkets.push({ market: newWhen, label: "WHEN" });
+      if (newWhen) newMarkets.push({ market: newWhen, options: await getMarketOptions(db, newWhen.id) });
       const newAlertType = await maybeCreateAlertTypeMarket(db);
-      if (newAlertType) newMarkets.push({ market: newAlertType, label: "ALERT_TYPE" });
+      if (newAlertType) newMarkets.push({ market: newAlertType, options: await getMarketOptions(db, newAlertType.id) });
       await maybeCreateHowManyMarket(db);
       await maybeCreateIntensityMarket(db);
       await maybeCreateWarDurationMarket(db);
 
-      for (const { market: m, label } of newMarkets) {
-        console.log(`[POLLER] Created new ${label} market #${m.id}`);
-        const opts = await getMarketOptions(db, m.id);
+      // Send one combined notification for all new markets
+      if (newMarkets.length > 0) {
+        console.log(`[POLLER] Created ${newMarkets.length} new markets`);
         await this.env.NOTIFICATION_QUEUE.send({
-          type: "market_opened",
-          market: m,
-          options: opts,
+          type: "markets_batch_opened",
+          markets: newMarkets,
         } satisfies NotificationMessage);
       }
     }

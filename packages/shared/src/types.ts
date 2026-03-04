@@ -187,4 +187,8 @@ export type NotificationMessage =
       type: "market_opened";
       market: Market;
       options: MarketOption[];
+    }
+  | {
+      type: "markets_batch_opened";
+      markets: Array<{ market: Market; options: MarketOption[] }>;
     };

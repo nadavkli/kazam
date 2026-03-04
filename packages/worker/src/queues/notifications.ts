@@ -39,6 +39,9 @@ async function processNotification(
     case "market_opened":
       await sendMarketOpenedNotification(notification, env);
       break;
+    case "markets_batch_opened":
+      await sendMarketsBatchNotification(notification, env);
+      break;
   }
 }
 
@@ -130,6 +133,51 @@ async function sendMarketOpenedNotification(
       [{ text: "🎲 המר עכשיו!", callback_data: `bet:market:${market.id}` }],
     ],
   };
+
+  const db = createDb(env.DB);
+  const users = await getAllUsers(db);
+
+  for (const user of users) {
+    try {
+      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
+    } catch {
+      // Skip users who blocked the bot
+    }
+  }
+}
+
+async function sendMarketsBatchNotification(
+  notification: Extract<NotificationMessage, { type: "markets_batch_opened" }>,
+  env: Env,
+): Promise<void> {
+  const { markets: newMarkets } = notification;
+  if (newMarkets.length === 0) return;
+
+  const emojiMap: Record<string, string> = {
+    where: "📍", when: "⏰", how_many: "🔢",
+    war_duration: "⚔️", alert_type: "🎯", intensity: "📊",
+  };
+
+  const lines = newMarkets.map((m) => {
+    const emoji = emojiMap[m.market.type] ?? "🎲";
+    return `${emoji} ${m.market.question}`;
+  });
+
+  const text =
+    `🎲 *${newMarkets.length} הימורים חדשים נפתחו!*\n\n` +
+    lines.join("\n") +
+    `\n\nלחץ למטה כדי להמר! 👇`;
+
+  const buttons = newMarkets.map((m) => {
+    const emoji = emojiMap[m.market.type] ?? "🎲";
+    const typeLabels: Record<string, string> = {
+      where: "איפה?", when: "מתי?", alert_type: "מה?",
+      how_many: "כמה?", intensity: "עוצמה", war_duration: "כמה זמן?",
+    };
+    return [{ text: `${emoji} ${typeLabels[m.market.type] ?? "המר"}`, callback_data: `bet:market:${m.market.id}` }];
+  });
+
+  const keyboard = { inline_keyboard: buttons };
 
   const db = createDb(env.DB);
   const users = await getAllUsers(db);
