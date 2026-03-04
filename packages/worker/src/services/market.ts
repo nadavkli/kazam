@@ -310,7 +310,7 @@ export async function maybeCreateIntensityMarket(
  */
 export async function settleExpiredHowManyMarkets(
   db: Database,
-): Promise<{ settled: number; notifications: NotificationMessage[] }> {
+): Promise<{ settled: number; notifications: NotificationMessage[]; newMarkets: Market[] }> {
   const openMarkets = await listMarkets(db, {
     status: "open",
     type: "how_many",
@@ -420,8 +420,11 @@ export async function settleExpiredHowManyMarkets(
   }
 
   // Create tomorrow's markets
-  await maybeCreateHowManyMarket(db);
-  await maybeCreateIntensityMarket(db);
+  const newMarkets: Market[] = [];
+  const newHowMany = await maybeCreateHowManyMarket(db);
+  if (newHowMany) newMarkets.push(newHowMany);
+  const newIntensity = await maybeCreateIntensityMarket(db);
+  if (newIntensity) newMarkets.push(newIntensity);
 
-  return { settled: settledCount, notifications: allNotifications };
+  return { settled: settledCount, notifications: allNotifications, newMarkets };
 }

@@ -265,9 +265,18 @@ export default {
     } else {
       // End of day IST (20:59 UTC) — settle daily markets
       const result = await settleExpiredHowManyMarkets(db);
-      console.log(`[CRON] Settled ${result.settled} HOW_MANY markets`);
+      console.log(`[CRON] Settled ${result.settled} daily markets, created ${result.newMarkets.length} new`);
+      // Send individual win/loss notifications
       for (const n of result.notifications) {
         await env.NOTIFICATION_QUEUE.send(n);
+      }
+      // Send combined daily summary to all users
+      if (result.settled > 0 || result.newMarkets.length > 0) {
+        await env.NOTIFICATION_QUEUE.send({
+          type: "daily_summary",
+          settled: result.settled,
+          newMarkets: result.newMarkets,
+        });
       }
     }
   },

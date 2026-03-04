@@ -42,6 +42,9 @@ async function processNotification(
     case "markets_batch_opened":
       await sendMarketsBatchNotification(notification, env);
       break;
+    case "daily_summary":
+      await sendDailySummaryNotification(notification, env);
+      break;
   }
 }
 
@@ -178,6 +181,55 @@ async function sendMarketsBatchNotification(
   });
 
   const keyboard = { inline_keyboard: buttons };
+
+  const db = createDb(env.DB);
+  const users = await getAllUsers(db);
+
+  for (const user of users) {
+    try {
+      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
+    } catch {
+      // Skip users who blocked the bot
+    }
+  }
+}
+
+async function sendDailySummaryNotification(
+  notification: Extract<NotificationMessage, { type: "daily_summary" }>,
+  env: Env,
+): Promise<void> {
+  const { settled, newMarkets } = notification;
+
+  const emojiMap: Record<string, string> = {
+    where: "📍", when: "⏰", how_many: "🔢",
+    war_duration: "⚔️", alert_type: "🎯", intensity: "📊",
+  };
+
+  let text = `📊 *סיכום יומי*\n\n`;
+
+  if (settled > 0) {
+    text += `✅ ${settled} הימורים נסגרו — בדקו אם ניצחתם!\n\n`;
+  }
+
+  if (newMarkets.length > 0) {
+    text += `🎲 *הימורים חדשים למחר:*\n`;
+    for (const m of newMarkets) {
+      const emoji = emojiMap[m.type] ?? "🎲";
+      text += `${emoji} ${m.question}\n`;
+    }
+    text += `\nלחצו למטה להמר! 👇`;
+  }
+
+  const buttons = newMarkets.map((m) => {
+    const emoji = emojiMap[m.type] ?? "🎲";
+    const typeLabels: Record<string, string> = {
+      how_many: "כמה מחר?", intensity: "עוצמה מחר",
+      where: "איפה?", when: "מתי?", alert_type: "מה?",
+    };
+    return [{ text: `${emoji} ${typeLabels[m.type] ?? "המר"}`, callback_data: `bet:market:${m.id}` }];
+  });
+
+  const keyboard = buttons.length > 0 ? { inline_keyboard: buttons } : undefined;
 
   const db = createDb(env.DB);
   const users = await getAllUsers(db);

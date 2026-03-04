@@ -191,4 +191,9 @@ export type NotificationMessage =
   | {
       type: "markets_batch_opened";
       markets: Array<{ market: Market; options: MarketOption[] }>;
+    }
+  | {
+      type: "daily_summary";
+      settled: number;
+      newMarkets: Market[];
     };
