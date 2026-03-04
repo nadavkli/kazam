@@ -8,7 +8,7 @@ export const MAX_BET = 500;
 export const RAKE_PERCENT = 5;
 
 /** Virtual seed per option for initial liquidity — guarantees meaningful payouts even for solo bettors */
-export const OPTION_SEED_AMOUNT = 500;
+export const OPTION_SEED_AMOUNT = 100;
 
 /** Daily login bonus */
 export const DAILY_BONUS = 100;

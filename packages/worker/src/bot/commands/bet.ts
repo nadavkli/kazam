@@ -1,7 +1,6 @@
 import type { BotContext } from "../context.js";
 import { InlineKeyboard } from "grammy";
 import { listMarkets, getMarketOptions } from "@kazam/db/queries";
-import { calculateMarketOdds } from "@kazam/shared/odds";
 
 function getMarketEmoji(type: string): string {
   const map: Record<string, string> = {

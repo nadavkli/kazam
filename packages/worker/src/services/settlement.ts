@@ -12,7 +12,7 @@ import {
 } from "@kazam/db/queries";
 import { calculatePayout, calculateWhenPayout } from "@kazam/shared/odds";
 import { WHEN_BUCKETS } from "@kazam/shared/constants";
-import { bets, users, markets, marketOptions } from "@kazam/shared/schema";
+import { users, markets, marketOptions } from "@kazam/shared/schema";
 import { eq, and, sql } from "drizzle-orm";
 import type { NotificationMessage } from "@kazam/shared/types";
 
@@ -72,9 +72,6 @@ export async function settleMarket(
   const alertTime = Date.now();
   const isWhenMarket = market.type === "when";
 
-  // Pre-compute seed totals for payout calculations
-  const totalSeeds = options.reduce((sum, o) => sum + (o.seed_amount ?? 100), 0);
-
   if (isWhenMarket) {
     // === WHEN MARKET: per-bet evaluation ===
     // Pass 1: collect all bets and determine winners
@@ -113,8 +110,6 @@ export async function settleMarket(
           bet.amount,
           market.total_pool,
           totalWinningAmount,
-          options.length,
-          totalSeeds,
         );
         await updateUserCoins(db, bet.user_id, payout, "earned");
 
@@ -165,9 +160,6 @@ export async function settleMarket(
             bet.amount,
             market.total_pool,
             winningOption.total_amount,
-            options.length,
-            winningOption.seed_amount ?? 100,
-            totalSeeds,
           );
           await updateUserCoins(db, bet.user_id, payout, "earned");
 
