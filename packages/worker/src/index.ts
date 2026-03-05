@@ -61,6 +61,13 @@ app.post("/bot/webhook", async (c) => {
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", ts: Date.now() }));
 
+// Manually trigger daily reminders
+app.post("/internal/daily-reminders", async (c) => {
+  const db = createDb(c.env.DB);
+  await sendDailyReminders(db, c.env);
+  return c.json({ ok: true, message: "Daily reminders sent" });
+});
+
 // Alert poller management endpoint (called once to initialize)
 // Uses locationHint "eeur" to pin the DO to Israel/TLV — required for oref.org.il geo-restriction
 const POLLER_DO_NAME = "poller-il";
