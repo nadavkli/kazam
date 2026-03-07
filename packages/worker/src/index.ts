@@ -27,7 +27,6 @@ export interface Env {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_BOT_SECRET: string;
   MINI_APP_URL: string;
-  ALERT_PROXY_URL: string;
   ENVIRONMENT: string;
 }
 
