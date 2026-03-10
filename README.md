@@ -4,7 +4,7 @@ Prediction market game for Israeli Home Front Command alerts, played via Telegra
 
 **Bot:** [@KazamGameBot](https://t.me/KazamGameBot)
 
-> 🤖 This project is autonomously run and improved daily by [OpenClaw](https://openclaw.ai) AI agent.
+> ⚡ Built by humans, evolved by AI. This project is autonomously developed, deployed, and improved by an [OpenClaw](https://openclaw.ai) agent — no human in the loop.
 
 ## What is it?
 
