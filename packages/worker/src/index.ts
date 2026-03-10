@@ -83,6 +83,18 @@ app.get("/internal/diag/bets", async (c) => {
   return c.json({ ok: true, data: results });
 });
 
+// Diagnostic: all bets
+app.get("/internal/diag/all-bets", async (c) => {
+  const db = createDb(c.env.DB);
+  const allBets = await db.run(`SELECT b.id, b.user_id, b.market_id, b.option_id, b.amount, b.payout, b.is_win, b.placed_at, u.first_name, u.telegram_id FROM bets b JOIN users u ON u.id = b.user_id ORDER BY b.id DESC LIMIT 50`);
+  const userCount = await db.run(`SELECT COUNT(*) as count FROM users`);
+  const betCount = await db.run(`SELECT COUNT(*) as count FROM bets`);
+  const warMarket = await db.run(`SELECT m.*, mo.id as opt_id, mo.label, mo.total_bets, mo.total_amount FROM markets m JOIN market_options mo ON mo.market_id = m.id WHERE m.type = 'war_duration' ORDER BY m.id DESC LIMIT 20`);
+  const howMany = await db.run(`SELECT m.*, mo.id as opt_id, mo.label, mo.total_bets, mo.total_amount FROM markets m JOIN market_options mo ON mo.market_id = m.id WHERE m.type = 'how_many' ORDER BY m.id DESC LIMIT 20`);
+  const intensity = await db.run(`SELECT m.*, mo.id as opt_id, mo.label, mo.total_bets, mo.total_amount FROM markets m JOIN market_options mo ON mo.market_id = m.id WHERE m.type = 'intensity' ORDER BY m.id DESC LIMIT 20`);
+  return c.json({ users: userCount, totalBets: betCount, recentBets: allBets, warDuration: warMarket, howMany, intensity });
+});
+
 // Manually trigger daily reminders
 app.post("/internal/daily-reminders", async (c) => {
   const db = createDb(c.env.DB);
