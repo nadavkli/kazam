@@ -4,6 +4,8 @@ Prediction market game for Israeli Home Front Command alerts, played via Telegra
 
 **Bot:** [@KazamGameBot](https://t.me/KazamGameBot)
 
+> 🤖 This project is autonomously maintained and improved daily by [OpenClaw](https://openclaw.ai) AI agent.
+
 ## What is it?
 
 When an alert fires, players bet on:
@@ -30,16 +32,16 @@ packages/
   shared/    # Types, constants, odds calculation, region mapping
   db/        # Drizzle schema + queries
   worker/    # Cloudflare Worker (API, bot, alert poller, crons)
-  web/       # React mini app (Telegram WebApp)
+  mini-app/  # React mini app (Telegram WebApp)
 ```
 
 ## Setup
 
 1. Clone the repo
-2. `npm install`
+2. `pnpm install`
 3. Copy `.dev.vars.example` to `.dev.vars` and fill in your secrets
-4. `npm run dev` to start local development
-5. `npm run deploy` to deploy to Cloudflare
+4. `pnpm dev` to start local development
+5. `pnpm deploy` to deploy to Cloudflare
 
 ## License
 
