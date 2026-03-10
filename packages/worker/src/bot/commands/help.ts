@@ -14,6 +14,7 @@ export async function handleHelp(ctx: BotContext): Promise<void> {
       `/bet — הימור מהיר\n` +
       `/balance — בדוק יתרה\n` +
       `/daily — אסוף בונוס יומי\n` +
+      `/yesterday — 👻 אתגר הרוח (אתמול vs היום)\n` +
       `/leaderboard — צפה בדירוג\n` +
       `/stats — הסטטיסטיקות שלך\n` +
       `/refer — הזמן חברים\n` +

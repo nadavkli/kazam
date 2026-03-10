@@ -12,6 +12,7 @@ import { handleDaily } from "./commands/daily.js";
 import { handleStats } from "./commands/stats.js";
 import { handleRefer } from "./commands/refer.js";
 import { handleHelp } from "./commands/help.js";
+import { yesterdayCommand } from "./commands/yesterday.js";
 
 // Callbacks
 import { handleBetFlowCallback } from "./callbacks/bet-flow.js";
@@ -46,6 +47,7 @@ function createBot(env: Env): Bot<BotContext> {
   bot.command("stats", handleStats);
   bot.command("refer", handleRefer);
   bot.command("help", handleHelp);
+  bot.command("yesterday", yesterdayCommand);
 
   // Callback queries (inline keyboard)
   bot.callbackQuery(/^bet:/, handleBetFlowCallback);
