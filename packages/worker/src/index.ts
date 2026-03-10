@@ -60,6 +60,29 @@ app.post("/bot/webhook", async (c) => {
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", ts: Date.now() }));
 
+// Diagnostic: compare total_bets counter vs actual bet count
+app.get("/internal/diag/bets", async (c) => {
+  const db = createDb(c.env.DB);
+  const results = await db.run(
+    `SELECT 
+      m.id as market_id,
+      m.question,
+      m.status,
+      m.total_pool,
+      mo.id as option_id,
+      mo.label,
+      mo.total_bets,
+      mo.total_amount,
+      (SELECT COUNT(*) FROM bets b WHERE b.option_id = mo.id) as actual_bet_count,
+      (SELECT SUM(b.amount) FROM bets b WHERE b.option_id = mo.id) as actual_bet_amount
+    FROM markets m
+    JOIN market_options mo ON mo.market_id = m.id
+    ORDER BY m.id DESC
+    LIMIT 100`
+  );
+  return c.json({ ok: true, data: results });
+});
+
 // Manually trigger daily reminders
 app.post("/internal/daily-reminders", async (c) => {
   const db = createDb(c.env.DB);
