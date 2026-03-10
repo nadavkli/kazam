@@ -1,17 +1,21 @@
 import type { CommandContext } from "grammy";
-import type { BotContext } from "../types.js";
+import type { BotContext } from "../context.js";
 import { getGhostComparison, generateShareCard } from "../../services/daily-summary.js";
-import { createDb } from "@kazam/db";
+import { getUserByTelegramId } from "@kazam/db/queries";
 
 export async function yesterdayCommand(ctx: CommandContext<BotContext>) {
-  const user = ctx.session.user;
+  if (!ctx.from) {
+    await ctx.reply("Please /start first!");
+    return;
+  }
+
+  const user = await getUserByTelegramId(ctx.db, ctx.from.id);
   if (!user) {
     await ctx.reply("Please /start first!");
     return;
   }
 
-  const db = createDb(ctx.env.DB);
-  const ghost = await getGhostComparison(db, user.id);
+  const ghost = await getGhostComparison(ctx.db, user.id);
 
   if (!ghost.yesterday_summary) {
     await ctx.reply(

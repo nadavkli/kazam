@@ -3,7 +3,7 @@ import type { Env } from "../index.js";
 import { createDb } from "@kazam/db";
 import { getUserByTelegramId } from "@kazam/db/queries";
 import { getGhostComparison, generateShareCard } from "../services/daily-summary.js";
-import { parseTelegramInitData } from "../auth/telegram.js";
+import { getTelegramUser } from "./auth.js";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -12,15 +12,7 @@ const app = new Hono<{ Bindings: Env }>();
  * Returns yesterday vs today comparison + ghost betting suggestion
  */
 app.get("/", async (c) => {
-  const initData = c.req.header("X-Telegram-Init-Data");
-  if (!initData) {
-    return c.json({ error: "Missing Telegram init data" }, 401);
-  }
-
-  const telegramUser = parseTelegramInitData(initData, c.env.TELEGRAM_BOT_TOKEN);
-  if (!telegramUser) {
-    return c.json({ error: "Invalid init data" }, 401);
-  }
+  const telegramUser = getTelegramUser(c);
 
   const db = createDb(c.env.DB);
   const user = await getUserByTelegramId(db, telegramUser.id);
