@@ -60,41 +60,6 @@ app.post("/bot/webhook", async (c) => {
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", ts: Date.now() }));
 
-// Diagnostic: compare total_bets counter vs actual bet count
-app.get("/internal/diag/bets", async (c) => {
-  const db = createDb(c.env.DB);
-  const results = await db.run(
-    `SELECT 
-      m.id as market_id,
-      m.question,
-      m.status,
-      m.total_pool,
-      mo.id as option_id,
-      mo.label,
-      mo.total_bets,
-      mo.total_amount,
-      (SELECT COUNT(*) FROM bets b WHERE b.option_id = mo.id) as actual_bet_count,
-      (SELECT SUM(b.amount) FROM bets b WHERE b.option_id = mo.id) as actual_bet_amount
-    FROM markets m
-    JOIN market_options mo ON mo.market_id = m.id
-    ORDER BY m.id DESC
-    LIMIT 100`
-  );
-  return c.json({ ok: true, data: results });
-});
-
-// Diagnostic: all bets
-app.get("/internal/diag/all-bets", async (c) => {
-  const db = createDb(c.env.DB);
-  const allBets = await db.run(`SELECT b.id, b.user_id, b.market_id, b.option_id, b.amount, b.payout, b.is_win, b.placed_at, u.first_name, u.telegram_id FROM bets b JOIN users u ON u.id = b.user_id ORDER BY b.id DESC LIMIT 50`);
-  const userCount = await db.run(`SELECT COUNT(*) as count FROM users`);
-  const betCount = await db.run(`SELECT COUNT(*) as count FROM bets`);
-  const warMarket = await db.run(`SELECT m.*, mo.id as opt_id, mo.label, mo.total_bets, mo.total_amount FROM markets m JOIN market_options mo ON mo.market_id = m.id WHERE m.type = 'war_duration' ORDER BY m.id DESC LIMIT 20`);
-  const howMany = await db.run(`SELECT m.*, mo.id as opt_id, mo.label, mo.total_bets, mo.total_amount FROM markets m JOIN market_options mo ON mo.market_id = m.id WHERE m.type = 'how_many' ORDER BY m.id DESC LIMIT 20`);
-  const intensity = await db.run(`SELECT m.*, mo.id as opt_id, mo.label, mo.total_bets, mo.total_amount FROM markets m JOIN market_options mo ON mo.market_id = m.id WHERE m.type = 'intensity' ORDER BY m.id DESC LIMIT 20`);
-  return c.json({ users: userCount, totalBets: betCount, recentBets: allBets, warDuration: warMarket, howMany, intensity });
-});
-
 // Manually trigger daily reminders
 app.post("/internal/daily-reminders", async (c) => {
   const db = createDb(c.env.DB);
