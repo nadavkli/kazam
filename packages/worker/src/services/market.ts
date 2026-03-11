@@ -24,6 +24,27 @@ import {
 import type { MarketType, Market, NotificationMessage } from "@kazam/shared/types";
 import { settleMarket } from "./settlement.js";
 
+/** Get current UTC offset string for IST (handles DST automatically) */
+function getISTOffsetString(): string {
+  // Use Intl to get the timezone offset parts
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: IST_TIMEZONE,
+    timeZoneName: 'shortOffset',
+  });
+  const parts = fmt.formatToParts(new Date());
+  const tzPart = parts.find(p => p.type === 'timeZoneName');
+  // Returns something like 'GMT+2' or 'GMT+3'
+  if (tzPart) {
+    const match = tzPart.value.match(/GMT([+-])(\d+)/);
+    if (match) {
+      const sign = match[1];
+      const hours = match[2].padStart(2, '0');
+      return sign + hours + ':00';
+    }
+  }
+  return '+02:00'; // fallback to IST winter
+}
+
 /**
  * Auto-create a WHERE market if cooldown has passed since last alert.
  */
@@ -147,7 +168,7 @@ export async function maybeCreateHowManyMarket(
   });
 
   const now = new Date().toISOString();
-  const endOfDay = new Date(`${today}T23:59:59+03:00`).toISOString();
+  const endOfDay = new Date(`${today}T23:59:59${getISTOffsetString()}`).toISOString();
 
   const market = await createMarket(db, {
     type: "how_many",
@@ -277,7 +298,7 @@ export async function maybeCreateIntensityMarket(
   const yCount = yesterdayCount?.total_count ?? 0;
 
   const now = new Date().toISOString();
-  const endOfDay = new Date(`${today}T23:59:59+03:00`).toISOString();
+  const endOfDay = new Date(`${today}T23:59:59${getISTOffsetString()}`).toISOString();
 
   const market = await createMarket(db, {
     type: "intensity",
