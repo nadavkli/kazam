@@ -225,8 +225,10 @@ export async function settleMarket(
     }
   }
 
-  // One win notification per winning user (consolidated payout)
+  // One win notification per winning user (consolidated payout) — includes prediction streak
   for (const [userId, { telegram_id, totalPayout }] of userPayouts) {
+    // Fetch user's updated streak (already incremented in settlement above)
+    const usr = await db.select({ current_streak: users.current_streak }).from(users).where(eq(users.id, userId)).get();
     notifications.push({
       type: "bet_result",
       user_id: userId,
@@ -235,10 +237,11 @@ export async function settleMarket(
       option_label: winOpt?.label ?? "",
       is_win: true,
       payout: totalPayout,
+      prediction_streak: usr?.current_streak ?? 0,
     });
   }
 
-  // One loss notification per losing user
+  // One loss notification per losing user (streak was reset to 0)
   for (const [userId, telegram_id] of loserUsers) {
     notifications.push({
       type: "bet_result",
@@ -248,6 +251,7 @@ export async function settleMarket(
       option_label: winOpt?.label ?? "",
       is_win: false,
       payout: 0,
+      prediction_streak: 0,
     });
   }
 

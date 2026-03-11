@@ -90,16 +90,28 @@ async function sendBetResultNotification(
   notification: Extract<NotificationMessage, { type: "bet_result" }>,
   env: Env,
 ): Promise<void> {
-  const { telegram_id, market_question, option_label, is_win, payout } =
+  const { telegram_id, market_question, option_label, is_win, payout, prediction_streak } =
     notification;
 
   let text: string;
   if (is_win) {
+    // Build streak display for winners
+    let streakLine = "";
+    if (prediction_streak >= 10) {
+      streakLine = `\n🔥🔥🔥 *רצף אגדי! ${prediction_streak} ברצף!* 🔥🔥🔥`;
+    } else if (prediction_streak >= 7) {
+      streakLine = `\n🔥🔥 *רצף מטורף! ${prediction_streak} ברצף!* 🔥🔥`;
+    } else if (prediction_streak >= 5) {
+      streakLine = `\n🔥 *Hot Streak! ${prediction_streak} ברצף!*`;
+    } else if (prediction_streak >= 3) {
+      streakLine = `\n🔥 *רצף ניצחונות — ${prediction_streak} ברצף!*`;
+    }
+
     text =
       `⚡ *Kazam! ניצחת!*\n\n` +
       `🎯 ${market_question}\n` +
       `✅ תשובה: ${option_label}\n` +
-      `💰 +${payout} מטבעות\n\n` +
+      `💰 +${payout} מטבעות${streakLine}\n\n` +
       `You called it! 🔥\n\n` +
       `🤝 הזמן חברים עם /refer וקבל עוד 200 מטבעות!`;
   } else {

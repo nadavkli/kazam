@@ -183,6 +183,8 @@ export type NotificationMessage =
       option_label: string;
       is_win: boolean;
       payout: number;
+      /** Current prediction winning streak (after this result) */
+      prediction_streak: number;
     }
   | {
       type: "market_opened";
