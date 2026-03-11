@@ -60,6 +60,8 @@ app.post("/bot/webhook", async (c) => {
 // Health check
 app.get("/health", (c) => c.json({ status: "ok", ts: Date.now() }));
 
+// Migration 0001 (daily_streak) applied 2026-03-11
+
 // Manually trigger daily reminders
 app.post("/internal/daily-reminders", async (c) => {
   const db = createDb(c.env.DB);
