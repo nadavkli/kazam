@@ -246,6 +246,7 @@ async function sendDailySummaryNotification(
 /**
  * Send daily reminder to users who haven't claimed their bonus today.
  * Called by cron at noon IST (09:00 UTC).
+ * Uses daily_streak (login streak) instead of current_streak (prediction streak).
  */
 export async function sendDailyReminders(
   db: Database,
@@ -257,8 +258,8 @@ export async function sendDailyReminders(
   console.log(`[DAILY] Sending reminders to ${users.length} users`);
 
   for (const user of users) {
-    const streakWarning = user.current_streak > 0
-      ? `\n🔥 יש לך רצף של ${user.current_streak} ימים! אל תפספס!`
+    const streakWarning = user.daily_streak > 0
+      ? `\n🔥 יש לך רצף של ${user.daily_streak} ימים! אל תפספס!`
       : "";
 
     const text =

@@ -76,6 +76,10 @@ export async function registerUser(
   return user;
 }
 
+/**
+ * Claim daily login bonus.
+ * Uses dedicated daily_streak field (separate from prediction current_streak).
+ */
 export async function claimDailyBonus(
   db: Database,
   user: User,
@@ -89,7 +93,7 @@ export async function claimDailyBonus(
     return { error: "Already claimed today's bonus" };
   }
 
-  // Check streak
+  // Check daily login streak (uses daily_streak, NOT current_streak)
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const yesterdayStr = yesterday.toLocaleDateString("en-CA", {
@@ -98,7 +102,7 @@ export async function claimDailyBonus(
 
   let newStreak: number;
   if (lastClaim === yesterdayStr) {
-    newStreak = user.current_streak + 1;
+    newStreak = user.daily_streak + 1;
   } else {
     newStreak = 1;
   }
@@ -106,15 +110,13 @@ export async function claimDailyBonus(
   const streakBonus = Math.min(newStreak * STREAK_BONUS, MAX_STREAK_BONUS);
   const totalBonus = DAILY_BONUS + streakBonus;
 
-  // Update user
-  const longestStreak = Math.max(user.longest_streak, newStreak);
+  // Update user — only touch daily_streak, leave current_streak (prediction) alone
   await db
     .update(users)
     .set({
       coins: sql`${users.coins} + ${totalBonus}`,
       total_earned: sql`${users.total_earned} + ${totalBonus}`,
-      current_streak: newStreak,
-      longest_streak: longestStreak,
+      daily_streak: newStreak,
       last_daily_claim_at: new Date().toISOString(),
     })
     .where(eq(users.id, user.id))

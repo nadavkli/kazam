@@ -325,6 +325,12 @@ export function listAlerts(
   return query.orderBy(desc(alerts.received_at)).limit(opts.limit).offset(opts.offset).all();
 }
 
+/**
+ * Upsert daily alert count.
+ * Uses per-region JSON increment via json_set + json_extract to correctly
+ * accumulate counts when multiple alerts hit the same region on the same day.
+ * (The old json_patch approach replaced values instead of summing — that was a bug.)
+ */
 export function upsertDailyCount(
   db: Database,
   date: string,
@@ -334,6 +340,23 @@ export function upsertDailyCount(
     regions: Record<string, number>;
   },
 ) {
+  // Build a json_set expression that increments each region count.
+  // Result: json_set(regions, '$.north', coalesce(json_extract(regions, '$.north'), 0) + 1, ...)
+  const regionEntries = Object.entries(data.regions);
+
+  // Build the regions update expression
+  let regionsSetExpr: string;
+  if (regionEntries.length === 0) {
+    regionsSetExpr = `"regions"`;
+  } else {
+    const setClauses = regionEntries.map(([region, count]) => {
+      const safeKey = region.replace(/[^a-zA-Z0-9_]/g, "");
+      const safeCount = Math.max(0, Math.floor(Number(count)));
+      return `'$.${safeKey}', COALESCE(json_extract("regions", '$.${safeKey}'), 0) + ${safeCount}`;
+    });
+    regionsSetExpr = `json_set("regions", ${setClauses.join(", ")})`;
+  }
+
   return db
     .insert(dailyAlertCounts)
     .values({ date, ...data })
@@ -342,7 +365,7 @@ export function upsertDailyCount(
       set: {
         missile_count: sql`${dailyAlertCounts.missile_count} + ${data.missile_count}`,
         total_count: sql`${dailyAlertCounts.total_count} + ${data.total_count}`,
-        regions: sql`json_patch(${dailyAlertCounts.regions}, ${JSON.stringify(data.regions)})`,
+        regions: sql.raw(regionsSetExpr),
       },
     })
     .run();
@@ -362,7 +385,12 @@ export function getAllUsers(db: Database) {
 
 export function getUsersWithoutDailyClaim(db: Database, today: string) {
   return db
-    .select({ id: users.id, telegram_id: users.telegram_id, first_name: users.first_name, current_streak: users.current_streak })
+    .select({
+      id: users.id,
+      telegram_id: users.telegram_id,
+      first_name: users.first_name,
+      daily_streak: users.daily_streak,
+    })
     .from(users)
     .where(
       sql`${users.last_daily_claim_at} IS NULL OR date(${users.last_daily_claim_at}) < ${today}`,

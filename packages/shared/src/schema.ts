@@ -15,6 +15,7 @@ export const users = sqliteTable(
     total_predictions: integer("total_predictions").notNull().default(0),
     current_streak: integer("current_streak").notNull().default(0),
     longest_streak: integer("longest_streak").notNull().default(0),
+    daily_streak: integer("daily_streak").notNull().default(0),
     last_daily_claim_at: text("last_daily_claim_at"),
     referral_code: text("referral_code").notNull(),
     referred_by: integer("referred_by"),

@@ -79,6 +79,7 @@ export interface User {
   total_predictions: number;
   current_streak: number;
   longest_streak: number;
+  daily_streak: number;
   last_daily_claim_at: string | null;
   referral_code: string;
   referred_by: number | null;
