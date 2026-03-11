@@ -3,6 +3,7 @@ import { getUserByTelegramId } from "@kazam/db/queries";
 import { placeBetService } from "../../services/bet.js";
 import { registerUser } from "../../services/user.js";
 import { checkAchievements } from "../../services/achievement.js";
+import { ACHIEVEMENT_INFO, type AchievementType } from "@kazam/shared/constants";
 
 export async function handleConfirmCallback(ctx: BotContext): Promise<void> {
   const data = ctx.callbackQuery?.data;
@@ -41,9 +42,9 @@ export async function handleConfirmCallback(ctx: BotContext): Promise<void> {
     return;
   }
 
-  // Check achievements
+  // Check achievements — capture newly unlocked ones
   const updatedUser = { ...user, total_predictions: user.total_predictions + 1 };
-  await checkAchievements(ctx.db, updatedUser);
+  const newAchievements = await checkAchievements(ctx.db, updatedUser);
 
   const option = result.market.options.find((o) => o.id === optionId);
   const potentialPayout = option
@@ -60,4 +61,20 @@ export async function handleConfirmCallback(ctx: BotContext): Promise<void> {
       `בהצלחה! 🤞`,
     { parse_mode: "Markdown" },
   );
+
+  // Send achievement unlock notification(s) as a separate message
+  if (newAchievements.length > 0) {
+    const lines = newAchievements.map((type) => {
+      const info = ACHIEVEMENT_INFO[type as AchievementType];
+      return info
+        ? `${info.emoji} *${info.label}* — ${info.description}`
+        : `🏅 *${type}*`;
+    });
+
+    await ctx.reply(
+      `🏆 *הישג חדש!*\n\n${lines.join("\n")}\n\n` +
+        `כל הכבוד! 🎉`,
+      { parse_mode: "Markdown" },
+    );
+  }
 }
