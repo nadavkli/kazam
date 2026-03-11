@@ -6,6 +6,9 @@ import { createDb } from "@kazam/db";
 import { getAllUsers, getUsersWithoutDailyClaim } from "@kazam/db/queries";
 import { IST_TIMEZONE, DAILY_BONUS } from "@kazam/shared/constants";
 
+/** Telegram allows ~30 msgs/sec to different chats. Use batches of 25 for safety. */
+const BROADCAST_BATCH_SIZE = 25;
+
 /**
  * Process notification queue messages — sends Telegram messages to users.
  */
@@ -48,6 +51,33 @@ async function processNotification(
   }
 }
 
+// ====== Broadcast helper ======
+
+/**
+ * Send a message to all users in parallel batches.
+ * Handles rate limiting by processing BROADCAST_BATCH_SIZE users concurrently.
+ * Silently skips users who blocked the bot (403 errors).
+ */
+async function broadcastToAllUsers(
+  env: Env,
+  text: string,
+  keyboard?: object,
+): Promise<void> {
+  const db = createDb(env.DB);
+  const users = await getAllUsers(db);
+
+  for (let i = 0; i < users.length; i += BROADCAST_BATCH_SIZE) {
+    const batch = users.slice(i, i + BROADCAST_BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map((user) =>
+        sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard),
+      ),
+    );
+  }
+}
+
+// ====== Notification handlers ======
+
 async function sendAlertNotification(
   notification: Extract<NotificationMessage, { type: "alert" }>,
   env: Env,
@@ -73,17 +103,7 @@ async function sendAlertNotification(
     ],
   };
 
-  // Broadcast to all users
-  const db = createDb(env.DB);
-  const users = await getAllUsers(db);
-
-  for (const user of users) {
-    try {
-      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
-    } catch {
-      // Skip users who blocked the bot
-    }
-  }
+  await broadcastToAllUsers(env, text, keyboard);
 }
 
 async function sendBetResultNotification(
@@ -161,23 +181,13 @@ async function sendMarketOpenedNotification(
     `🎯 ${market.question}\n\n` +
     `לחץ למטה כדי להמר עכשיו! 👇`;
 
-  // Inline keyboard with bet button
   const keyboard = {
     inline_keyboard: [
       [{ text: "🎲 המר עכשיו!", callback_data: `bet:market:${market.id}` }],
     ],
   };
 
-  const db = createDb(env.DB);
-  const users = await getAllUsers(db);
-
-  for (const user of users) {
-    try {
-      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
-    } catch {
-      // Skip users who blocked the bot
-    }
-  }
+  await broadcastToAllUsers(env, text, keyboard);
 }
 
 async function sendMarketsBatchNotification(
@@ -213,16 +223,7 @@ async function sendMarketsBatchNotification(
 
   const keyboard = { inline_keyboard: buttons };
 
-  const db = createDb(env.DB);
-  const users = await getAllUsers(db);
-
-  for (const user of users) {
-    try {
-      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
-    } catch {
-      // Skip users who blocked the bot
-    }
-  }
+  await broadcastToAllUsers(env, text, keyboard);
 }
 
 async function sendDailySummaryNotification(
@@ -262,16 +263,7 @@ async function sendDailySummaryNotification(
 
   const keyboard = buttons.length > 0 ? { inline_keyboard: buttons } : undefined;
 
-  const db = createDb(env.DB);
-  const users = await getAllUsers(db);
-
-  for (const user of users) {
-    try {
-      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
-    } catch {
-      // Skip users who blocked the bot
-    }
-  }
+  await broadcastToAllUsers(env, text, keyboard);
 }
 
 /**
@@ -288,40 +280,35 @@ export async function sendDailyReminders(
 
   console.log(`[DAILY] Sending reminders to ${users.length} users`);
 
-  for (const user of users) {
-    const streakWarning = user.daily_streak > 0
-      ? `\n🔥 יש לך רצף של ${user.daily_streak} ימים! אל תפספס!`
-      : "";
+  // Batch reminders in parallel too
+  for (let i = 0; i < users.length; i += BROADCAST_BATCH_SIZE) {
+    const batch = users.slice(i, i + BROADCAST_BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map((user) => {
+        const streakWarning = user.daily_streak > 0
+          ? `\n🔥 יש לך רצף של ${user.daily_streak} ימים! אל תפספס!`
+          : "";
 
-    const text =
-      `🎁 *לא שכחת לאסוף את הבונוס היומי?*\n\n` +
-      `💰 ${DAILY_BONUS} מטבעות מחכים לך!${streakWarning}\n\n` +
-      `👉 לחץ /daily לאיסוף\n\n` +
-      `🤝 הזמן חברים עם /refer וקבל 200 מטבעות בונוס לשניכם!`;
+        const text =
+          `🎁 *לא שכחת לאסוף את הבונוס היומי?*\n\n` +
+          `💰 ${DAILY_BONUS} מטבעות מחכים לך!${streakWarning}\n\n` +
+          `👉 לחץ /daily לאיסוף\n\n` +
+          `🤝 הזמן חברים עם /refer וקבל 200 מטבעות בונוס לשניכם!`;
 
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: "🎁 אסוף בונוס יומי", callback_data: "daily_claim" }],
-        [{ text: "🤝 הזמן חבר", callback_data: "refer_friend" }],
-      ],
-    };
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: "🎁 אסוף בונוס יומי", callback_data: "daily_claim" }],
+            [{ text: "🤝 הזמן חבר", callback_data: "refer_friend" }],
+          ],
+        };
 
-    try {
-      await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
-    } catch {
-      // Skip users who blocked the bot
-    }
+        return sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
+      }),
+    );
   }
 }
 
-async function sendTelegramMessage(
-  botToken: string,
-  chatId: number,
-  text: string,
-  parseMode = "Markdown",
-): Promise<void> {
-  await sendTelegramMessageWithKeyboard(botToken, chatId, text, undefined, parseMode);
-}
+// ====== Telegram API helpers ======
 
 async function sendTelegramMessageWithKeyboard(
   botToken: string,
@@ -346,6 +333,9 @@ async function sendTelegramMessageWithKeyboard(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`Telegram API error: ${response.status} - ${errorText}`);
+    // Only log non-403 errors (403 = user blocked bot, expected)
+    if (response.status !== 403) {
+      console.error(`Telegram API error: ${response.status} - ${errorText}`);
+    }
   }
 }
