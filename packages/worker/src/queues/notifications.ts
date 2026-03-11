@@ -94,6 +94,8 @@ async function sendBetResultNotification(
     notification;
 
   let text: string;
+  let keyboard: { inline_keyboard: Array<Array<{ text: string; callback_data?: string; switch_inline_query?: string }>> } | undefined;
+
   if (is_win) {
     // Build streak display for winners
     let streakLine = "";
@@ -112,18 +114,35 @@ async function sendBetResultNotification(
       `🎯 ${market_question}\n` +
       `✅ תשובה: ${option_label}\n` +
       `💰 +${payout} מטבעות${streakLine}\n\n` +
-      `You called it! 🔥\n\n` +
-      `🤝 הזמן חברים עם /refer וקבל עוד 200 מטבעות!`;
+      `You called it! 🔥`;
+
+    // Win: show "bet again" + "share" + "refer" buttons
+    keyboard = {
+      inline_keyboard: [
+        [{ text: "🎲 המר שוב!", callback_data: "bet:start" }],
+        [
+          { text: "📤 שתף ניצחון", switch_inline_query: `⚡ ניצחתי ב-Kazam! +${payout} מטבעות ${streakLine ? `(${prediction_streak} ברצף!)` : ""}\nבואו לשחק: @KazamGameBot 🎯` },
+          { text: "🤝 הזמן חבר", callback_data: "refer_friend" },
+        ],
+      ],
+    };
   } else {
     text =
       `😔 *לא הפעם...*\n\n` +
       `🎯 ${market_question}\n` +
       `❌ התשובה הנכונה: ${option_label}\n\n` +
-      `נגמרו המטבעות? הזמן חבר עם /refer וקבל 200 מטבעות בונוס! 🤝\n` +
-      `נסה שוב! בפעם הבאה תצליח 💪`;
+      `אל תוותר! הנקמה מתוקה 🔥`;
+
+    // Loss: show "revenge bet" + "refer for coins" buttons
+    keyboard = {
+      inline_keyboard: [
+        [{ text: "🔄 נקמה! המר שוב", callback_data: "bet:start" }],
+        [{ text: "🤝 הזמן חבר → +200 מטבעות", callback_data: "refer_friend" }],
+      ],
+    };
   }
 
-  await sendTelegramMessage(env.TELEGRAM_BOT_TOKEN, telegram_id, text);
+  await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, telegram_id, text, keyboard);
 }
 
 async function sendMarketOpenedNotification(
