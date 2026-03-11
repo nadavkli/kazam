@@ -140,6 +140,30 @@ app.post("/internal/settle", async (c) => {
 });
 
 // Trigger a simulated alert (for demo/testing)
+// Trigger daily market settlement manually
+app.post("/internal/settle-daily", async (c) => {
+  const db = createDb(c.env.DB);
+  const result = await settleExpiredHowManyMarkets(db);
+  // Send notifications
+  for (const n of result.notifications) {
+    await c.env.NOTIFICATION_QUEUE.send(n);
+  }
+  // Send daily summary
+  if (result.settled > 0 || result.newMarkets.length > 0) {
+    await c.env.NOTIFICATION_QUEUE.send({
+      type: "daily_summary",
+      settled: result.settled,
+      newMarkets: result.newMarkets,
+    });
+  }
+  return c.json({
+    ok: true,
+    settled: result.settled,
+    newMarkets: result.newMarkets.map(m => ({ id: m.id, type: m.type, question: m.question })),
+    notifications: result.notifications.length,
+  });
+});
+
 // Mirrors the full alert-poller logic: settle WHERE + WHEN, update daily counts, create new markets
 app.post("/internal/simulate-alert", async (c) => {
   const db = createDb(c.env.DB);
