@@ -28,6 +28,7 @@ export interface Env {
   TELEGRAM_BOT_SECRET: string;
   MINI_APP_URL: string;
   ENVIRONMENT: string;
+  INTERNAL_API_KEY: string;
 }
 
 const app = new Hono<{ Bindings: Env }>();
@@ -57,8 +58,17 @@ app.post("/bot/webhook", async (c) => {
   return c.json({ ok: true });
 });
 
-// Health check
+// Health check (public)
 app.get("/health", (c) => c.json({ status: "ok", ts: Date.now() }));
+
+// Auth middleware for /internal/* routes
+app.use("/internal/*", async (c, next) => {
+  const auth = c.req.header("Authorization");
+  if (!auth || auth !== `Bearer ${c.env.INTERNAL_API_KEY}`) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  await next();
+});
 
 // Migration 0001 (daily_streak) applied 2026-03-11
 
