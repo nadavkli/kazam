@@ -285,6 +285,7 @@ app.post("/internal/simulate-alert", async (c) => {
 
 // Comprehensive stats/analytics endpoint
 app.get("/internal/stats", async (c) => {
+  try {
   const d1 = c.env.DB;
   const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
   const yesterdayIST = new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
@@ -342,26 +343,31 @@ app.get("/internal/stats", async (c) => {
       SUM(CASE WHEN date(received_at) >= date(?, '-7 days') THEN 1 ELSE 0 END) as last_7d
     FROM alerts`).bind(todayIST, todayIST).first(),
 
-    d1.prepare(`SELECT
-      d.date,
-      COALESCE(u.new_users, 0) as new_users,
-      COALESCE(b.bets_placed, 0) as bets_placed,
-      COALESCE(b.bet_volume, 0) as bet_volume
-    FROM (
-      SELECT date(?, '-' || n || ' days') as date
-      FROM (SELECT 0 as n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4
-            UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9
-            UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13)
-    ) d
-    LEFT JOIN (
-      SELECT date(created_at) as date, COUNT(*) as new_users
-      FROM users GROUP BY date(created_at)
-    ) u ON d.date = u.date
-    LEFT JOIN (
-      SELECT date(placed_at) as date, COUNT(*) as bets_placed, SUM(amount) as bet_volume
-      FROM bets GROUP BY date(placed_at)
-    ) b ON d.date = b.date
-    ORDER BY d.date ASC`).bind(todayIST).all(),
+    // Growth: two separate queries (new users + bets per day) for last 14 days
+    // We generate date series in JS because D1 limits compound SELECT terms
+    (async () => {
+      const since = new Date(Date.now() - 13 * 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+      const [userGrowth, betGrowth] = await Promise.all([
+        d1.prepare(`SELECT date(created_at) as date, COUNT(*) as new_users
+          FROM users WHERE date(created_at) >= ? GROUP BY date(created_at)`).bind(since).all(),
+        d1.prepare(`SELECT date(placed_at) as date, COUNT(*) as bets_placed, SUM(amount) as bet_volume
+          FROM bets WHERE date(placed_at) >= ? GROUP BY date(placed_at)`).bind(since).all(),
+      ]);
+      const userMap = new Map((userGrowth.results ?? []).map((r: Record<string, unknown>) => [r.date, r.new_users]));
+      const betMap = new Map((betGrowth.results ?? []).map((r: Record<string, unknown>) => [r.date, r]));
+      const days = [];
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(Date.now() - i * 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+        const bRow = betMap.get(d) as Record<string, unknown> | undefined;
+        days.push({
+          date: d,
+          new_users: Number(userMap.get(d) ?? 0),
+          bets_placed: Number(bRow?.bets_placed ?? 0),
+          bet_volume: Number(bRow?.bet_volume ?? 0),
+        });
+      }
+      return { results: days };
+    })(),
 
     d1.prepare(`SELECT
       CASE
@@ -418,6 +424,9 @@ app.get("/internal/stats", async (c) => {
     },
     growth_14d: growthData?.results ?? [],
   });
+  } catch (err) {
+    return c.json({ ok: false, error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack : undefined }, 500);
+  }
 });
 
 export default {
