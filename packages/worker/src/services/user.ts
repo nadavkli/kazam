@@ -77,17 +77,38 @@ export async function registerUser(
 }
 
 /**
+ * Extract the IST date (YYYY-MM-DD) from a last_daily_claim_at value.
+ * Handles both formats:
+ * - Old: "2026-03-11T22:30:00.000Z" (UTC ISO) → convert to IST date
+ * - New: "2026-03-12|2026-03-11T22:30:00.000Z" (IST-date|UTC-ISO) → extract IST date prefix
+ */
+function claimToIsraelDate(claimStr: string): string {
+  if (claimStr.includes("|")) {
+    // New format: IST date is the prefix before the pipe
+    return claimStr.split("|")[0];
+  }
+  // Old format: convert UTC ISO to IST date
+  return new Date(claimStr).toLocaleDateString("en-CA", { timeZone: IST_TIMEZONE });
+}
+
+/**
  * Claim daily login bonus.
  * Uses dedicated daily_streak field (separate from prediction current_streak).
  * Atomic: uses conditional UPDATE to prevent double-claiming via race conditions.
+ *
+ * TIMEZONE NOTE: last_daily_claim_at is stored as UTC ISO string, but all
+ * comparisons use IST dates. We convert stored timestamps to IST before comparing.
+ * The atomic WHERE clause stores and checks the IST date prefix (YYYY-MM-DD)
+ * to ensure correctness across timezone boundaries.
  */
 export async function claimDailyBonus(
   db: Database,
   user: User,
 ): Promise<DailyClaimResponse | { error: string }> {
   const today = getIsraelDate();
+  // Convert stored claim timestamp to IST date for correct comparison
   const lastClaim = user.last_daily_claim_at
-    ? user.last_daily_claim_at.split("T")[0]
+    ? claimToIsraelDate(user.last_daily_claim_at)
     : null;
 
   // Quick check (non-atomic, just to avoid unnecessary DB writes)
@@ -112,22 +133,25 @@ export async function claimDailyBonus(
   const streakBonus = Math.min(newStreak * STREAK_BONUS, MAX_STREAK_BONUS);
   const totalBonus = DAILY_BONUS + streakBonus;
 
-  // ATOMIC update: only updates if last_daily_claim_at is NOT today
-  // This prevents race conditions from rapid clicks / multiple requests
+  // Store the IST date as prefix so the LIKE check in WHERE clause is timezone-correct.
+  // Format: "YYYY-MM-DD|YYYY-MM-DDTHH:MM:SS.SSSZ" — IST date prefix + full UTC timestamp.
+  // The LIKE check uses the IST date prefix; the UTC timestamp is preserved for auditing.
   const nowISO = new Date().toISOString();
+  const claimValue = `${today}|${nowISO}`;
   const result = await db
     .update(users)
     .set({
       coins: sql`${users.coins} + ${totalBonus}`,
       total_earned: sql`${users.total_earned} + ${totalBonus}`,
       daily_streak: newStreak,
-      last_daily_claim_at: nowISO,
+      last_daily_claim_at: claimValue,
     })
     .where(
       and(
         eq(users.id, user.id),
-        // Only claim if not already claimed today
-        // last_daily_claim_at is either NULL or doesn't start with today's date
+        // Only claim if not already claimed today (IST)
+        // last_daily_claim_at is either NULL or doesn't start with today's IST date
+        // Works with both old format (UTC ISO) and new format (IST-date|UTC-ISO)
         sql`(${users.last_daily_claim_at} IS NULL OR ${users.last_daily_claim_at} NOT LIKE ${today + "%"})`,
       ),
     )

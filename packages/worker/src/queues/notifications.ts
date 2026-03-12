@@ -3,7 +3,8 @@ import type { NotificationMessage } from "@kazam/shared/types";
 import type { Database } from "@kazam/db";
 import { REGION_LABELS, type Region } from "@kazam/shared/regions";
 import { createDb } from "@kazam/db";
-import { getAllUsers, getUsersWithoutDailyClaim } from "@kazam/db/queries";
+import { getAllUsers, getUsersWithoutDailyClaim, getUsersWithoutBetOnMarket } from "@kazam/db/queries";
+import { listMarkets } from "@kazam/db/queries";
 import { IST_TIMEZONE, DAILY_BONUS } from "@kazam/shared/constants";
 
 /** Telegram allows ~30 msgs/sec to different chats. Use batches of 25 for safety. */
@@ -303,6 +304,79 @@ export async function sendDailyReminders(
         };
 
         return sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
+      }),
+    );
+  }
+}
+
+/**
+ * Send "closing soon" FOMO reminders for daily markets (HOW_MANY, INTENSITY).
+ * Called by cron ~2.5 hours before daily markets close (21:30 IST).
+ * Only notifies users who haven't bet on those markets yet.
+ */
+export async function sendClosingSoonReminders(
+  db: Database,
+  env: Env,
+): Promise<void> {
+  // Find open daily markets (HOW_MANY and INTENSITY)
+  const openHowMany = await listMarkets(db, { status: "open", type: "how_many", limit: 1, offset: 0 });
+  const openIntensity = await listMarkets(db, { status: "open", type: "intensity", limit: 1, offset: 0 });
+
+  const dailyMarkets = [...openHowMany, ...openIntensity];
+  if (dailyMarkets.length === 0) {
+    console.log("[CLOSING-SOON] No open daily markets, skipping");
+    return;
+  }
+
+  // For each daily market, find users who haven't bet
+  // Merge user sets to avoid duplicate notifications
+  const userMarkets = new Map<number, { telegram_id: number; markets: typeof dailyMarkets }>();
+
+  for (const market of dailyMarkets) {
+    const usersWithoutBet = await getUsersWithoutBetOnMarket(db, market.id);
+    for (const u of usersWithoutBet) {
+      const existing = userMarkets.get(u.id);
+      if (existing) {
+        existing.markets.push(market);
+      } else {
+        userMarkets.set(u.id, { telegram_id: u.telegram_id, markets: [market] });
+      }
+    }
+  }
+
+  console.log(`[CLOSING-SOON] Sending reminders to ${userMarkets.size} users for ${dailyMarkets.length} markets`);
+
+  const emojiMap: Record<string, string> = {
+    how_many: "🔢", intensity: "📊",
+  };
+
+  // Batch send
+  const entries = [...userMarkets.values()];
+  for (let i = 0; i < entries.length; i += BROADCAST_BATCH_SIZE) {
+    const batch = entries.slice(i, i + BROADCAST_BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map((entry) => {
+        const marketLines = entry.markets.map((m) => {
+          const emoji = emojiMap[m.type] ?? "🎲";
+          return `${emoji} ${m.question}`;
+        });
+
+        const text =
+          `⏰ *הימורים נסגרים בקרוב!*\n\n` +
+          marketLines.join("\n") +
+          `\n\n🔥 עוד כמה שעות וזה נגמר — אל תפספסו!\n` +
+          `לחצו למטה להמר עכשיו 👇`;
+
+        const buttons = entry.markets.map((m) => {
+          const emoji = emojiMap[m.type] ?? "🎲";
+          const typeLabels: Record<string, string> = {
+            how_many: "כמה אזעקות?", intensity: "יותר או פחות?",
+          };
+          return [{ text: `${emoji} ${typeLabels[m.type] ?? "המר"}`, callback_data: `bet:market:${m.id}` }];
+        });
+
+        const keyboard = { inline_keyboard: buttons };
+        return sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, entry.telegram_id, text, keyboard);
       }),
     );
   }

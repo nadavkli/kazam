@@ -28,9 +28,12 @@ queue = "kazam-notifications"
 max_batch_size = 10
 max_batch_timeout = 5
 
-# Cron trigger: settle HOW_MANY markets at end of day IST (23:59 IST = 20:59 UTC)
+# Cron triggers (all times UTC):
+# - 0 22 * * * = 00:00 IST (winter) / 01:00 IST (summer) — settle daily markets (after 23:59 IST close)
+# - 30 19 * * * = 21:30 IST (winter) / 22:30 IST (summer) — "closing soon" FOMO reminders
+# - 0 9 * * * = 11:00 IST (winter) / 12:00 IST (summer) — daily bonus reminders
 [triggers]
-crons = ["0 21 * * *", "0 9 * * *"]
+crons = ["0 22 * * *", "30 19 * * *", "0 9 * * *"]
 
 [[kv_namespaces]]
 binding = "ALERTS_CACHE"

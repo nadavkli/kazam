@@ -383,6 +383,13 @@ export function getAllUsers(db: Database) {
   return db.select({ id: users.id, telegram_id: users.telegram_id }).from(users).all();
 }
 
+/**
+ * Get users who haven't claimed daily bonus today.
+ * Handles both old format ("2026-03-12T...Z" UTC ISO) and
+ * new format ("2026-03-12|2026-03-11T...Z" IST-date|UTC-ISO).
+ * For new format: extracts IST date prefix (before '|').
+ * For old format: uses date() to extract UTC date (close enough for reminder purposes).
+ */
 export function getUsersWithoutDailyClaim(db: Database, today: string) {
   return db
     .select({
@@ -393,7 +400,24 @@ export function getUsersWithoutDailyClaim(db: Database, today: string) {
     })
     .from(users)
     .where(
-      sql`${users.last_daily_claim_at} IS NULL OR date(${users.last_daily_claim_at}) < ${today}`,
+      sql`${users.last_daily_claim_at} IS NULL OR SUBSTR(${users.last_daily_claim_at}, 1, 10) < ${today}`,
+    )
+    .all();
+}
+
+/**
+ * Get all users who have NOT placed any bet on a given market.
+ * Used for "closing soon" reminders — only notify users who might still want to bet.
+ */
+export function getUsersWithoutBetOnMarket(db: Database, marketId: number) {
+  return db
+    .select({
+      id: users.id,
+      telegram_id: users.telegram_id,
+    })
+    .from(users)
+    .where(
+      sql`${users.id} NOT IN (SELECT DISTINCT ${bets.user_id} FROM ${bets} WHERE ${bets.market_id} = ${marketId})`,
     )
     .all();
 }

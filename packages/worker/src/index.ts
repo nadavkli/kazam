@@ -5,7 +5,7 @@ import { handleBotWebhook } from "./bot/index.js";
 import { createDb } from "@kazam/db";
 import type { Database } from "@kazam/db";
 import { AlertPoller as AlertPollerDO } from "./durable-objects/alert-poller.js";
-import { handleNotificationBatch, sendDailyReminders } from "./queues/notifications.js";
+import { handleNotificationBatch, sendDailyReminders, sendClosingSoonReminders } from "./queues/notifications.js";
 import {
   maybeCreateWhereMarket,
   maybeCreateWhenMarket,
@@ -139,7 +139,6 @@ app.post("/internal/settle", async (c) => {
   });
 });
 
-// Trigger a simulated alert (for demo/testing)
 // Trigger daily market settlement manually
 app.post("/internal/settle-daily", async (c) => {
   const db = createDb(c.env.DB);
@@ -292,10 +291,13 @@ export default {
     const db = createDb(env.DB);
 
     if (event.cron === "0 9 * * *") {
-      // Noon IST (09:00 UTC) — daily reminder to claim bonus + refer friends
+      // ~11:00 IST — daily reminder to claim bonus + refer friends
       await sendDailyReminders(db, env);
+    } else if (event.cron === "30 19 * * *") {
+      // ~21:30 IST — "closing soon" FOMO reminders for daily markets
+      await sendClosingSoonReminders(db, env);
     } else {
-      // End of day IST (20:59 UTC) — settle daily markets
+      // 0 22 * * * = ~00:00 IST next day — settle expired daily markets
       const result = await settleExpiredHowManyMarkets(db);
       console.log(`[CRON] Settled ${result.settled} daily markets, created ${result.newMarkets.length} new`);
       // Send individual win/loss notifications
