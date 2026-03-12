@@ -331,11 +331,15 @@ app.get("/internal/stats", async (c) => {
       (SELECT COUNT(DISTINCT user_id) FROM bets WHERE date(placed_at) >= date(?, '-7 days')) as wau`)
       .bind(todayIST, yesterdayIST, todayIST).first(),
 
+    // Anonymous user activity distribution (no PII)
     d1.prepare(`SELECT
-      first_name, username, total_predictions as bets_count,
-      total_wagered, correct_predictions
-    FROM users WHERE total_predictions > 0
-    ORDER BY total_wagered DESC LIMIT 5`).all(),
+      COUNT(CASE WHEN total_predictions >= 50 THEN 1 END) as power_users,
+      COUNT(CASE WHEN total_predictions >= 10 AND total_predictions < 50 THEN 1 END) as regular_users,
+      COUNT(CASE WHEN total_predictions >= 1 AND total_predictions < 10 THEN 1 END) as casual_users,
+      COUNT(CASE WHEN total_predictions = 0 THEN 1 END) as lurkers,
+      COALESCE(MAX(total_predictions), 0) as max_bets,
+      COALESCE(MAX(current_streak), 0) as best_streak
+    FROM users`).first(),
 
     d1.prepare(`SELECT
       COUNT(*) as total,
@@ -415,7 +419,14 @@ app.get("/internal/stats", async (c) => {
       dau_yesterday: dauStats?.dau_yesterday ?? 0,
       wau: dauStats?.wau ?? 0,
       retention_d1_pct: retentionData?.d1_retention ?? null,
-      top_users: topUsers?.results ?? [],
+      user_segments: {
+        power_50plus: topUsers?.power_users ?? 0,
+        regular_10_49: topUsers?.regular_users ?? 0,
+        casual_1_9: topUsers?.casual_users ?? 0,
+        lurkers_0: topUsers?.lurkers ?? 0,
+      },
+      max_bets_by_user: topUsers?.max_bets ?? 0,
+      best_active_streak: topUsers?.best_streak ?? 0,
     },
     alerts: {
       total: alertStats?.total ?? 0,
