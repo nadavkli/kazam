@@ -283,6 +283,143 @@ app.post("/internal/simulate-alert", async (c) => {
   return c.json({ ok: true, results });
 });
 
+// Comprehensive stats/analytics endpoint
+app.get("/internal/stats", async (c) => {
+  const d1 = c.env.DB;
+  const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+  const yesterdayIST = new Date(Date.now() - 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Jerusalem" });
+
+  const [
+    userStats,
+    betStats,
+    marketStats,
+    dauStats,
+    topUsers,
+    alertStats,
+    growthData,
+    retentionData,
+  ] = await Promise.all([
+    d1.prepare(`SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN date(created_at) = ? THEN 1 ELSE 0 END) as today,
+      SUM(CASE WHEN date(created_at) >= date(?, '-7 days') THEN 1 ELSE 0 END) as last_7d,
+      SUM(CASE WHEN date(created_at) >= date(?, '-30 days') THEN 1 ELSE 0 END) as last_30d,
+      SUM(CASE WHEN SUBSTR(last_daily_claim_at, 1, 10) = ? THEN 1 ELSE 0 END) as claimed_daily_today,
+      (SELECT COUNT(DISTINCT user_id) FROM bets) as with_bets
+    FROM users`).bind(todayIST, todayIST, todayIST, todayIST).first(),
+
+    d1.prepare(`SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN date(placed_at) = ? THEN 1 ELSE 0 END) as today,
+      SUM(CASE WHEN date(placed_at) >= date(?, '-7 days') THEN 1 ELSE 0 END) as last_7d,
+      COALESCE(SUM(amount), 0) as total_volume,
+      COALESCE(SUM(CASE WHEN date(placed_at) = ? THEN amount ELSE 0 END), 0) as today_volume,
+      COALESCE(ROUND(AVG(amount)), 0) as avg_bet_size
+    FROM bets`).bind(todayIST, todayIST, todayIST).first(),
+
+    d1.prepare(`SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) as open_count,
+      SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved,
+      COALESCE(SUM(total_pool), 0) as total_pool
+    FROM markets`).first(),
+
+    d1.prepare(`SELECT
+      (SELECT COUNT(DISTINCT user_id) FROM bets WHERE date(placed_at) = ?) as dau_today,
+      (SELECT COUNT(DISTINCT user_id) FROM bets WHERE date(placed_at) = ?) as dau_yesterday,
+      (SELECT COUNT(DISTINCT user_id) FROM bets WHERE date(placed_at) >= date(?, '-7 days')) as wau`)
+      .bind(todayIST, yesterdayIST, todayIST).first(),
+
+    d1.prepare(`SELECT
+      first_name, username, total_predictions as bets_count,
+      total_wagered, correct_predictions
+    FROM users WHERE total_predictions > 0
+    ORDER BY total_wagered DESC LIMIT 5`).all(),
+
+    d1.prepare(`SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN date(received_at) = ? THEN 1 ELSE 0 END) as today,
+      SUM(CASE WHEN date(received_at) >= date(?, '-7 days') THEN 1 ELSE 0 END) as last_7d
+    FROM alerts`).bind(todayIST, todayIST).first(),
+
+    d1.prepare(`SELECT
+      d.date,
+      COALESCE(u.new_users, 0) as new_users,
+      COALESCE(b.bets_placed, 0) as bets_placed,
+      COALESCE(b.bet_volume, 0) as bet_volume
+    FROM (
+      SELECT date(?, '-' || n || ' days') as date
+      FROM (SELECT 0 as n UNION SELECT 1 UNION SELECT 2 UNION SELECT 3 UNION SELECT 4
+            UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9
+            UNION SELECT 10 UNION SELECT 11 UNION SELECT 12 UNION SELECT 13)
+    ) d
+    LEFT JOIN (
+      SELECT date(created_at) as date, COUNT(*) as new_users
+      FROM users GROUP BY date(created_at)
+    ) u ON d.date = u.date
+    LEFT JOIN (
+      SELECT date(placed_at) as date, COUNT(*) as bets_placed, SUM(amount) as bet_volume
+      FROM bets GROUP BY date(placed_at)
+    ) b ON d.date = b.date
+    ORDER BY d.date ASC`).bind(todayIST).all(),
+
+    d1.prepare(`SELECT
+      CASE
+        WHEN (SELECT COUNT(*) FROM users WHERE date(created_at) = date(?, '-1 day')) = 0 THEN NULL
+        ELSE ROUND(
+          100.0 * (
+            SELECT COUNT(DISTINCT u.id)
+            FROM users u JOIN bets b ON b.user_id = u.id
+            WHERE date(u.created_at) = date(?, '-1 day') AND date(b.placed_at) = ?
+          ) / (SELECT COUNT(*) FROM users WHERE date(created_at) = date(?, '-1 day')),
+          1
+        )
+      END as d1_retention`)
+      .bind(todayIST, todayIST, todayIST, todayIST).first(),
+  ]);
+
+  return c.json({
+    ok: true,
+    generated_at: new Date().toISOString(),
+    date_ist: todayIST,
+    users: {
+      total: userStats?.total ?? 0,
+      new_today: userStats?.today ?? 0,
+      new_last_7d: userStats?.last_7d ?? 0,
+      new_last_30d: userStats?.last_30d ?? 0,
+      claimed_daily_today: userStats?.claimed_daily_today ?? 0,
+      ever_bet: userStats?.with_bets ?? 0,
+    },
+    bets: {
+      total: betStats?.total ?? 0,
+      today: betStats?.today ?? 0,
+      last_7d: betStats?.last_7d ?? 0,
+      total_volume: betStats?.total_volume ?? 0,
+      today_volume: betStats?.today_volume ?? 0,
+      avg_bet_size: betStats?.avg_bet_size ?? 0,
+    },
+    markets: {
+      total: marketStats?.total ?? 0,
+      open: marketStats?.open_count ?? 0,
+      resolved: marketStats?.resolved ?? 0,
+      total_pool: marketStats?.total_pool ?? 0,
+    },
+    engagement: {
+      dau_today: dauStats?.dau_today ?? 0,
+      dau_yesterday: dauStats?.dau_yesterday ?? 0,
+      wau: dauStats?.wau ?? 0,
+      retention_d1_pct: retentionData?.d1_retention ?? null,
+      top_users: topUsers?.results ?? [],
+    },
+    alerts: {
+      total: alertStats?.total ?? 0,
+      today: alertStats?.today ?? 0,
+      last_7d: alertStats?.last_7d ?? 0,
+    },
+    growth_14d: growthData?.results ?? [],
+  });
+});
+
 export default {
   fetch: app.fetch,
 
