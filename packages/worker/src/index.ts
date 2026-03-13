@@ -463,7 +463,7 @@ export default {
     } else if (event.cron === "30 19 * * *") {
       // ~21:30 IST — "closing soon" FOMO reminders for daily markets
       await sendClosingSoonReminders(db, env);
-    } else if (event.cron === "0 20 * * 0") {
+    } else if (event.cron === "0 20 * * 1") {
       // ~22:00 IST Sunday — settle weekly leaderboard
       await settleWeeklyLeaderboard(db, env);
     } else {
