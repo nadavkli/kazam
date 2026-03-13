@@ -199,4 +199,19 @@ export type NotificationMessage =
       type: "daily_summary";
       settled: number;
       newMarkets: Market[];
+    }
+  | {
+      type: "weekly_leaderboard";
+      top_users: Array<{
+        rank: number;
+        telegram_id: number;
+        first_name: string;
+        username: string | null;
+        weekly_wins: number;
+        weekly_bets: number;
+        weekly_payout: number;
+        weekly_score: number;
+        bonus_awarded: number;
+      }>;
+      total_bets_this_week: number;
     };

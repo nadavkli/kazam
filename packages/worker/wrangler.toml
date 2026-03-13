@@ -33,7 +33,8 @@ max_batch_timeout = 5
 # - 30 19 * * * = 21:30 IST (winter) / 22:30 IST (summer) — "closing soon" FOMO reminders
 # - 0 9 * * * = 11:00 IST (winter) / 12:00 IST (summer) — daily bonus reminders
 [triggers]
-crons = ["0 22 * * *", "30 19 * * *", "0 9 * * *"]
+# - 0 20 * * 0 = 22:00 IST Sunday — weekly leaderboard settlement
+crons = ["0 22 * * *", "30 19 * * *", "0 9 * * *", "0 20 * * 0"]
 
 [[kv_namespaces]]
 binding = "ALERTS_CACHE"

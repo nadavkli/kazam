@@ -3,9 +3,11 @@ import type { NotificationMessage } from "@kazam/shared/types";
 import type { Database } from "@kazam/db";
 import { REGION_LABELS, type Region } from "@kazam/shared/regions";
 import { createDb } from "@kazam/db";
-import { getAllUsers, getUsersWithoutDailyClaim, getUsersWithoutBetOnMarket } from "@kazam/db/queries";
+import { users, achievements } from "@kazam/shared/schema";
+import { eq, sql } from "drizzle-orm";
+import { getAllUsers, getUsersWithoutDailyClaim, getUsersWithoutBetOnMarket, getWeeklyLeaderboard } from "@kazam/db/queries";
 import { listMarkets } from "@kazam/db/queries";
-import { IST_TIMEZONE, DAILY_BONUS } from "@kazam/shared/constants";
+import { IST_TIMEZONE, DAILY_BONUS, WEEKLY_TOP_BONUS } from "@kazam/shared/constants";
 
 /** Telegram allows ~30 msgs/sec to different chats. Use batches of 25 for safety. */
 const BROADCAST_BATCH_SIZE = 25;
@@ -48,6 +50,9 @@ async function processNotification(
       break;
     case "daily_summary":
       await sendDailySummaryNotification(notification, env);
+      break;
+    case "weekly_leaderboard":
+      await sendWeeklyLeaderboardNotification(notification, env);
       break;
   }
 }
@@ -380,6 +385,111 @@ export async function sendClosingSoonReminders(
       }),
     );
   }
+}
+
+/**
+ * Settle weekly leaderboard: award top 10 users, unlock achievements, broadcast results.
+ * Called by cron every Sunday at 22:00 IST.
+ */
+export async function settleWeeklyLeaderboard(
+  db: Database,
+  env: Env,
+): Promise<void> {
+  const topUsers = await getWeeklyLeaderboard(db, 10);
+
+  if (topUsers.length === 0) {
+    console.log("[WEEKLY] No bets this week, skipping leaderboard settlement");
+    return;
+  }
+
+  console.log(`[WEEKLY] Settling leaderboard: ${topUsers.length} users in top 10`);
+
+  // Award bonus coins and unlock achievement
+  const enrichedUsers: Array<{
+    rank: number;
+    telegram_id: number;
+    first_name: string;
+    username: string | null;
+    weekly_wins: number;
+    weekly_bets: number;
+    weekly_payout: number;
+    weekly_score: number;
+    bonus_awarded: number;
+  }> = [];
+
+  for (let i = 0; i < topUsers.length; i++) {
+    const user = topUsers[i];
+    const bonus = WEEKLY_TOP_BONUS;
+
+    // Award bonus coins
+    await db
+      .update(users)
+      .set({
+        coins: sql`${users.coins} + ${bonus}`,
+        total_earned: sql`${users.total_earned} + ${bonus}`,
+      })
+      .where(eq(users.id, user.user_id))
+      .run();
+
+    // Unlock top_10_weekly achievement
+    await db
+      .insert(achievements)
+      .values({ user_id: user.user_id, type: "top_10_weekly" })
+      .onConflictDoNothing()
+      .run();
+
+    enrichedUsers.push({
+      rank: i + 1,
+      telegram_id: user.telegram_id,
+      first_name: user.first_name,
+      username: user.username,
+      weekly_wins: user.weekly_wins,
+      weekly_bets: user.weekly_bets,
+      weekly_payout: user.weekly_payout,
+      weekly_score: user.weekly_score,
+      bonus_awarded: bonus,
+    });
+  }
+
+  // Calculate total weekly bets for the broadcast message
+  const totalWeeklyBets = topUsers.reduce((sum, u) => sum + u.weekly_bets, 0);
+
+  // Send leaderboard results via queue
+  await env.NOTIFICATION_QUEUE.send({
+    type: "weekly_leaderboard",
+    top_users: enrichedUsers,
+    total_bets_this_week: totalWeeklyBets,
+  } satisfies NotificationMessage);
+}
+
+async function sendWeeklyLeaderboardNotification(
+  notification: Extract<NotificationMessage, { type: "weekly_leaderboard" }>,
+  env: Env,
+): Promise<void> {
+  const { top_users } = notification;
+
+  const medals = ["🥇", "🥈", "🥉"];
+  const lines = top_users.map((u, i) => {
+    const medal = medals[i] ?? `${i + 1}.`;
+    const name = u.username ? `@${u.username}` : u.first_name;
+    return `${medal} ${name} — ${u.weekly_wins} ✅ / ${u.weekly_bets} הימורים (+${u.weekly_payout} 🪙)`;
+  });
+
+  const text =
+    `🏆 *דירוג שבועי — Kazam!*\n\n` +
+    lines.join("\n") +
+    `\n\n💰 כל ה-Top 10 קיבלו *${WEEKLY_TOP_BONUS} מטבעות* בונוס!\n` +
+    `🔥 שבוע חדש מתחיל — בואו לכבוש את המקום הראשון!\n\n` +
+    `🤝 הזמינו חברים וקבלו 200 מטבעות בונוס!`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🎲 המר עכשיו!", callback_data: "bet:start" }],
+      [{ text: "🤝 הזמן חבר", callback_data: "refer_friend" }],
+    ],
+  };
+
+  await broadcastToAllUsers(env, text, keyboard);
 }
 
 // ====== Telegram API helpers ======

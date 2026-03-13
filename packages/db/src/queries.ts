@@ -503,3 +503,37 @@ export async function getReferralCount(db: Database, userId: number) {
     .get();
   return result?.count ?? 0;
 }
+
+// ====== Weekly Leaderboard Queries ======
+
+/**
+ * Get the top N users by weekly performance.
+ * Ranks users by: wins * 10 + total_payout / 100 from bets placed in the last 7 days.
+ * Only counts resolved bets (is_win IS NOT NULL).
+ */
+export function getWeeklyLeaderboard(db: Database, limit: number = 10) {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  return db
+    .select({
+      user_id: bets.user_id,
+      telegram_id: users.telegram_id,
+      username: users.username,
+      first_name: users.first_name,
+      weekly_wins: sql<number>`SUM(CASE WHEN ${bets.is_win} = 1 THEN 1 ELSE 0 END)`,
+      weekly_bets: sql<number>`COUNT(*)`,
+      weekly_payout: sql<number>`COALESCE(SUM(CASE WHEN ${bets.is_win} = 1 THEN ${bets.payout} ELSE 0 END), 0)`,
+      weekly_score: sql<number>`SUM(CASE WHEN ${bets.is_win} = 1 THEN 1 ELSE 0 END) * 10 + COALESCE(SUM(CASE WHEN ${bets.is_win} = 1 THEN ${bets.payout} ELSE 0 END), 0) / 100`,
+    })
+    .from(bets)
+    .innerJoin(users, eq(bets.user_id, users.id))
+    .where(
+      and(
+        gte(bets.placed_at, weekAgo),
+        sql`${bets.is_win} IS NOT NULL`,
+      ),
+    )
+    .groupBy(bets.user_id)
+    .orderBy(desc(sql`SUM(CASE WHEN ${bets.is_win} = 1 THEN 1 ELSE 0 END) * 10 + COALESCE(SUM(CASE WHEN ${bets.is_win} = 1 THEN ${bets.payout} ELSE 0 END), 0) / 100`))
+    .limit(limit)
+    .all();
+}
