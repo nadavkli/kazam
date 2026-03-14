@@ -65,6 +65,46 @@ function createBot(env: Env): Bot<BotContext> {
     await handleRefer(ctx);
   });
 
+  // Stats share callback — sends shareable stats as text for forwarding
+  bot.callbackQuery("stats_share", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const from = ctx.from;
+    if (!from) return;
+
+    const { getUserByTelegramId, getUserAchievements } = await import("@kazam/db/queries");
+    const { ACHIEVEMENT_INFO } = await import("@kazam/shared/constants");
+    const user = await getUserByTelegramId(ctx.db, from.id);
+    if (!user) return;
+
+    const accuracy = user.total_predictions > 0
+      ? Math.round((user.correct_predictions / user.total_predictions) * 100)
+      : 0;
+    const score = user.correct_predictions * 10 + Math.floor(user.total_earned / 100) + user.current_streak * 5;
+
+    const achievements = await getUserAchievements(ctx.db, user.id);
+    const badgeEmojis = achievements
+      .map((a: { type: string }) => (ACHIEVEMENT_INFO as Record<string, { emoji: string }>)[a.type]?.emoji)
+      .filter(Boolean)
+      .join("");
+
+    const shareText =
+      `⚡ Kazam Stats — ${user.first_name}\n\n` +
+      `🎯 דיוק: ${accuracy}% (${user.correct_predictions}/${user.total_predictions})\n` +
+      `🔥 רצף: ${user.current_streak} | שיא: ${user.longest_streak}\n` +
+      `🏆 ניקוד: ${score}\n` +
+      `${badgeEmojis ? `🏅 ${badgeEmojis}\n` : ""}` +
+      `\nחושבים שאתם יותר טובים? 😏\n` +
+      `שחקו ב-@KazamGameBot 🚀`;
+
+    await ctx.reply(shareText);
+  });
+
+  // Stats leaderboard callback — show leaderboard
+  bot.callbackQuery("stats_leaderboard", async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await handleLeaderboard(ctx);
+  });
+
   // Copy referral link callback — sends link as plain text for easy copying
   bot.callbackQuery(/^copy_referral_/, async (ctx) => {
     const code = ctx.callbackQuery.data.replace("copy_referral_", "");
