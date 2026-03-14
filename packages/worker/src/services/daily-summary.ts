@@ -4,6 +4,25 @@ import { eq, and, gte, lt, sql, desc } from "drizzle-orm";
 import { IST_TIMEZONE } from "@kazam/shared/constants";
 import type { User } from "@kazam/shared/types";
 
+/** Get current UTC offset string for IST (handles DST automatically) */
+function getISTOffsetString(): string {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: IST_TIMEZONE,
+    timeZoneName: 'shortOffset',
+  });
+  const parts = fmt.formatToParts(new Date());
+  const tzPart = parts.find(p => p.type === 'timeZoneName');
+  if (tzPart) {
+    const match = tzPart.value.match(/GMT([+-])(\d+)/);
+    if (match) {
+      const sign = match[1];
+      const hours = match[2].padStart(2, '0');
+      return sign + hours + ':00';
+    }
+  }
+  return '+02:00'; // fallback to IST winter
+}
+
 export interface DailySummary {
   date: string;
   total_wagered: number;
@@ -21,20 +40,22 @@ export interface DailySummary {
 export interface GhostComparison {
   yesterday_summary: DailySummary | null;
   today_summary: DailySummary | null;
-  if_repeated_result: number; // What would happen if you bet the same today as yesterday
+  if_repeated_result: number;
   suggestion: "revenge" | "copy" | "try_different" | null;
 }
 
 /**
  * Get a user's betting summary for a specific date (IST timezone).
+ * Uses dynamic timezone offset to handle DST correctly.
  */
 export async function getDailySummary(
   db: Database,
   userId: number,
   dateStr: string, // YYYY-MM-DD in IST
 ): Promise<DailySummary> {
-  const dayStart = new Date(`${dateStr}T00:00:00+03:00`);
-  const dayEnd = new Date(`${dateStr}T23:59:59+03:00`);
+  const offset = getISTOffsetString();
+  const dayStart = new Date(`${dateStr}T00:00:00${offset}`);
+  const dayEnd = new Date(`${dateStr}T23:59:59${offset}`);
 
   const userBets = await db
     .select({
@@ -69,7 +90,6 @@ export async function getDailySummary(
     ...userBets.map((b) => (b.bet.payout ?? 0) - b.bet.amount),
   );
 
-  // Find favorite market type
   const marketTypeCounts = new Map<string, number>();
   for (const b of userBets) {
     const type = b.market.type;
@@ -80,7 +100,6 @@ export async function getDailySummary(
       ? [...marketTypeCounts.entries()].sort((a, b) => b[1] - a[1])[0][0]
       : null;
 
-  // Find favorite option label
   const optionCounts = new Map<string, number>();
   for (const b of userBets) {
     const label = b.option.label;
@@ -124,22 +143,18 @@ export async function getGhostComparison(
   const yesterdaySummary = await getDailySummary(db, userId, yesterday);
   const todaySummary = await getDailySummary(db, userId, today);
 
-  // Simulate "what if you bet the same as yesterday?"
-  // For now, simple heuristic: if yesterday was net positive, "copy" is suggested
-  // If yesterday was net negative, "revenge" (bet opposite or different) is suggested
   let suggestion: GhostComparison["suggestion"] = null;
   let ifRepeatedResult = 0;
 
   if (yesterdaySummary.bets_placed > 0) {
     if (yesterdaySummary.net_change > 0) {
       suggestion = "copy";
-      // Estimate: if win rate was X yesterday, assume similar today
       ifRepeatedResult = Math.round(
         yesterdaySummary.total_wagered * (yesterdaySummary.win_rate * 1.5 - 0.5),
       );
     } else if (yesterdaySummary.net_change < 0) {
       suggestion = "revenge";
-      ifRepeatedResult = yesterdaySummary.net_change; // Show the loss
+      ifRepeatedResult = yesterdaySummary.net_change;
     } else {
       suggestion = "try_different";
       ifRepeatedResult = 0;
