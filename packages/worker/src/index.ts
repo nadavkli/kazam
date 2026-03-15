@@ -5,7 +5,7 @@ import { handleBotWebhook } from "./bot/index.js";
 import { createDb } from "@kazam/db";
 import type { Database } from "@kazam/db";
 import { AlertPoller as AlertPollerDO } from "./durable-objects/alert-poller.js";
-import { handleNotificationBatch, sendDailyReminders, sendClosingSoonReminders, settleWeeklyLeaderboard } from "./queues/notifications.js";
+import { handleNotificationBatch, sendDailyReminders, sendClosingSoonReminders, settleWeeklyLeaderboard, sendPersonalWeeklyRecaps } from "./queues/notifications.js";
 import {
   maybeCreateWhereMarket,
   maybeCreateWhenMarket,
@@ -466,6 +466,7 @@ export default {
     } else if (event.cron === "0 20 * * 1") {
       // ~22:00 IST Sunday — settle weekly leaderboard
       await settleWeeklyLeaderboard(db, env);
+      await sendPersonalWeeklyRecaps(db, env);
     } else {
       // 0 22 * * * = ~00:00 IST next day — settle expired daily markets
       const result = await settleExpiredHowManyMarkets(db);
