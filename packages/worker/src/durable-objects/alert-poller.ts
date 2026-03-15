@@ -307,16 +307,9 @@ export class AlertPoller implements DurableObject {
         const elapsed = now - new Date(whenMarket.opens_at).getTime();
         const options = await getMarketOptions(db, whenMarket.id);
 
-        // Find the matching time bucket
-        const buckets = [
-          { max: 3600000, idx: 0 },
-          { max: 10800000, idx: 1 },
-          { max: 21600000, idx: 2 },
-          { max: 43200000, idx: 3 },
-          { max: 86400000, idx: 4 },
-          { max: Infinity, idx: 5 },
-        ];
-        const matchIdx = buckets.find((b) => elapsed < b.max)?.idx ?? 5;
+        // Find the matching time bucket using shared WHEN_BUCKETS constant
+        const matchIdx = WHEN_BUCKETS.findIndex((b) => elapsed >= b.min_ms && elapsed < b.max_ms);
+        const winBucketIdx = matchIdx >= 0 ? matchIdx : WHEN_BUCKETS.length - 1;
         const winOpt = options[winBucketIdx];
 
         if (winOpt) {
