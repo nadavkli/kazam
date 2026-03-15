@@ -537,3 +537,59 @@ export function getWeeklyLeaderboard(db: Database, limit: number = 10) {
     .limit(limit)
     .all();
 }
+
+
+// ====== Bet History Query ======
+
+/**
+ * Get a user's recent bet history with market details.
+ * Returns bets ordered by most recent first.
+ */
+export function getUserBetHistory(db: Database, userId: number, limit: number = 10) {
+  return db
+    .select({
+      id: bets.id,
+      amount: bets.amount,
+      payout: bets.payout,
+      is_win: bets.is_win,
+      placed_at: bets.placed_at,
+      market_type: markets.type,
+      market_question: markets.question,
+      market_status: markets.status,
+      option_label: marketOptions.label,
+    })
+    .from(bets)
+    .innerJoin(markets, eq(bets.market_id, markets.id))
+    .innerJoin(marketOptions, eq(bets.option_id, marketOptions.id))
+    .where(eq(bets.user_id, userId))
+    .orderBy(desc(bets.placed_at))
+    .limit(limit)
+    .all();
+}
+
+// ====== Weekly User Summary Query ======
+
+/**
+ * Get a user's weekly stats summary for personal recap DMs.
+ * Returns bet count, wins, losses, net change, accuracy.
+ */
+export function getUserWeeklySummary(db: Database, userId: number) {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  return db
+    .select({
+      total_bets: sql<number>`COUNT(*)`,
+      total_wins: sql<number>`SUM(CASE WHEN ${bets.is_win} = 1 THEN 1 ELSE 0 END)`,
+      total_wagered: sql<number>`COALESCE(SUM(${bets.amount}), 0)`,
+      total_payout: sql<number>`COALESCE(SUM(CASE WHEN ${bets.is_win} = 1 THEN ${bets.payout} ELSE 0 END), 0)`,
+      biggest_win: sql<number>`COALESCE(MAX(CASE WHEN ${bets.is_win} = 1 THEN ${bets.payout} ELSE 0 END), 0)`,
+    })
+    .from(bets)
+    .where(
+      and(
+        eq(bets.user_id, userId),
+        gte(bets.placed_at, weekAgo),
+        sql`${bets.is_win} IS NOT NULL`,
+      ),
+    )
+    .get();
+}

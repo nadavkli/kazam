@@ -5,7 +5,7 @@ import { REGION_LABELS, type Region } from "@kazam/shared/regions";
 import { createDb } from "@kazam/db";
 import { users, achievements } from "@kazam/shared/schema";
 import { eq, sql } from "drizzle-orm";
-import { getAllUsers, getUsersWithoutDailyClaim, getUsersWithoutBetOnMarket, getWeeklyLeaderboard } from "@kazam/db/queries";
+import { getAllUsers, getUsersWithoutDailyClaim, getUsersWithoutBetOnMarket, getWeeklyLeaderboard, getUserWeeklySummary } from "@kazam/db/queries";
 import { listMarkets } from "@kazam/db/queries";
 import { IST_TIMEZONE, DAILY_BONUS, WEEKLY_TOP_BONUS } from "@kazam/shared/constants";
 
@@ -490,6 +490,72 @@ async function sendWeeklyLeaderboardNotification(
   };
 
   await broadcastToAllUsers(env, text, keyboard);
+}
+
+
+/**
+ * Send personalized weekly recap DMs to all active users.
+ * Sent alongside the weekly leaderboard to give each user their own stats.
+ */
+export async function sendPersonalWeeklyRecaps(
+  db: Database,
+  env: Env,
+): Promise<void> {
+  const allUsersList = await getAllUsers(db);
+
+  console.log(`[WEEKLY-RECAP] Generating personal recaps for ${allUsersList.length} users`);
+
+  for (let i = 0; i < allUsersList.length; i += BROADCAST_BATCH_SIZE) {
+    const batch = allUsersList.slice(i, i + BROADCAST_BATCH_SIZE);
+    await Promise.allSettled(
+      batch.map(async (user) => {
+        const summary = await getUserWeeklySummary(db, user.id);
+        if (!summary || summary.total_bets === 0) return; // Skip inactive users
+
+        const accuracy = summary.total_bets > 0
+          ? Math.round((summary.total_wins / summary.total_bets) * 100)
+          : 0;
+        const netChange = summary.total_payout - summary.total_wagered;
+        const netStr = netChange >= 0 ? `+${netChange}` : `${netChange}`;
+        const netEmoji = netChange > 0 ? "📈" : netChange < 0 ? "📉" : "➡️";
+
+        // Personalized encouragement based on performance
+        let encouragement: string;
+        if (accuracy >= 70) {
+          encouragement = "🏆 שבוע מטורף! אתה אחד הטובים!";
+        } else if (accuracy >= 50) {
+          encouragement = "💪 שבוע טוב! ממשיכים להשתפר!";
+        } else if (accuracy >= 30) {
+          encouragement = "🎯 יש פוטנציאל! השבוע הבא יהיה יותר טוב!";
+        } else {
+          encouragement = "🔄 לא קל, אבל כל שבוע הוא הזדמנות חדשה!";
+        }
+
+        const text =
+          `📊 *הסיכום השבועי שלך*\n` +
+          `${"─".repeat(20)}\n\n` +
+          `🎲 הימורים: *${summary.total_bets}*\n` +
+          `✅ ניצחונות: *${summary.total_wins}*\n` +
+          `🎯 דיוק: *${accuracy}%*\n` +
+          `${netEmoji} רווח/הפסד: *${netStr} 🪙*\n` +
+          (summary.biggest_win > 0 ? `💰 הזכייה הגדולה: *+${summary.biggest_win} 🪙*\n` : "") +
+          `\n${encouragement}\n\n` +
+          `שבוע חדש מתחיל — בואו לכבוש! 🔥`;
+
+        const keyboard = {
+          inline_keyboard: [
+            [{ text: "🎲 המר עכשיו!", callback_data: "bet:start" }],
+            [
+              { text: "📊 סטטיסטיקות מלאות", callback_data: "stats_share" },
+              { text: "🤝 הזמן חבר", callback_data: "refer_friend" },
+            ],
+          ],
+        };
+
+        await sendTelegramMessageWithKeyboard(env.TELEGRAM_BOT_TOKEN, user.telegram_id, text, keyboard);
+      }),
+    );
+  }
 }
 
 // ====== Telegram API helpers ======

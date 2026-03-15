@@ -9,6 +9,7 @@ import {
 import { citiesToRegions, primaryRegion, type Region } from "@kazam/shared/regions";
 import {
   ALERT_POLL_INTERVAL_MS,
+  WHEN_BUCKETS,
   ALERT_DEDUP_WINDOW_MS,
   SENSITIVITY_THRESHOLD_PER_HOUR,
   IST_TIMEZONE,
@@ -316,7 +317,7 @@ export class AlertPoller implements DurableObject {
           { max: Infinity, idx: 5 },
         ];
         const matchIdx = buckets.find((b) => elapsed < b.max)?.idx ?? 5;
-        const winOpt = options[matchIdx];
+        const winOpt = options[winBucketIdx];
 
         if (winOpt) {
           const result = await settleMarket(
