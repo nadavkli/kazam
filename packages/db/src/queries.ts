@@ -593,3 +593,44 @@ export function getUserWeeklySummary(db: Database, userId: number) {
     )
     .get();
 }
+// ====== Activity Feed ======
+
+/**
+ * Get recent bets across all users for live activity feed.
+ * Shows first name, market, option, and amount to create social proof.
+ */
+export function getRecentBets(db: Database, limit = 20) {
+  return db
+    .select({
+      id: bets.id,
+      amount: bets.amount,
+      placed_at: bets.placed_at,
+      user_first_name: users.first_name,
+      market_question: markets.question,
+      market_type: markets.type,
+      option_label: marketOptions.label,
+    })
+    .from(bets)
+    .innerJoin(users, eq(bets.user_id, users.id))
+    .innerJoin(markets, eq(bets.market_id, markets.id))
+    .innerJoin(marketOptions, eq(bets.option_id, marketOptions.id))
+    .orderBy(desc(bets.placed_at))
+    .limit(limit)
+    .all();
+}
+
+/**
+ * Count distinct users who placed bets in the last N minutes.
+ * Used for "X people playing now" social proof counter.
+ */
+export async function getActiveUsersCount(db: Database, minutesAgo = 5): Promise<number> {
+  const threshold = new Date(Date.now() - minutesAgo * 60 * 1000).toISOString();
+  
+  const result = await db
+    .select({ count: sql<number>`COUNT(DISTINCT ${bets.user_id})` })
+    .from(bets)
+    .where(gte(bets.placed_at, threshold))
+    .get();
+  
+  return result?.count ?? 0;
+}

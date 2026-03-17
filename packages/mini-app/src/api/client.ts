@@ -67,4 +67,19 @@ export const api = {
   },
 
   getLatestAlert: () => request<{ alert: unknown | null }>("/alerts/latest"),
+
+  // Activity
+  getActivity: (limit = 20) =>
+    request<{
+      active_users_count: number;
+      recent_bets: Array<{
+        id: number;
+        user_first_name: string;
+        market_type: string;
+        market_question: string;
+        option_label: string;
+        amount: number;
+        placed_at: string;
+      }>;
+    }>(`/activity?limit=${limit}`),
 };

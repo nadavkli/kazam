@@ -93,3 +93,13 @@ export function useLatestAlert() {
     refetchInterval: 5_000,
   });
 }
+
+// === Activity Feed ===
+
+export function useActivity(limit = 20) {
+  return useQuery({
+    queryKey: ["activity", limit],
+    queryFn: () => api.getActivity(limit),
+    refetchInterval: 5_000,
+  });
+}
